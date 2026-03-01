@@ -38,8 +38,7 @@ export async function setupCopilotToken() {
       }
     }
     catch (error) {
-      consola.error('Failed to refresh Copilot token:', error)
-      throw error
+      consola.error('Failed to refresh Copilot token, will retry next cycle:', error)
     }
   }, refreshInterval)
 }
