@@ -15,8 +15,9 @@ export interface DaemonConfig {
 }
 
 export function saveDaemonConfig(config: DaemonConfig): void {
+  const { githubToken: _removed, ...safeConfig } = config
   fs.mkdirSync(PATHS.APP_DIR, { recursive: true })
-  fs.writeFileSync(PATHS.DAEMON_JSON, JSON.stringify(config, null, 2))
+  fs.writeFileSync(PATHS.DAEMON_JSON, JSON.stringify(safeConfig, null, 2), { mode: 0o600 })
 }
 
 export function loadDaemonConfig(): DaemonConfig | null {

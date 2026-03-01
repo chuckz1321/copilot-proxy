@@ -18,6 +18,13 @@ export async function runAsSupervisor(runFn: () => Promise<void>): Promise<void>
   process.on('SIGTERM', cleanup)
   process.on('SIGINT', cleanup)
 
+  // On Windows, SIGTERM doesn't fire - use 'exit' as fallback to clean up PID file
+  if (process.platform === 'win32') {
+    process.on('exit', () => {
+      removePidFile()
+    })
+  }
+
   while (true) {
     lastStartTime = Date.now()
     try {

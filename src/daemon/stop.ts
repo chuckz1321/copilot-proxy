@@ -24,25 +24,20 @@ function stopDaemon(): void {
 
   // Wait for process to exit (poll up to 10s)
   const deadline = Date.now() + 10_000
-  const poll = () => {
-    if (!isProcessRunning(pid)) {
-      removePidFile()
-      consola.success('Daemon stopped')
-      return
-    }
-    if (Date.now() > deadline) {
-      consola.warn('Process did not exit in time, sending SIGKILL')
-      try {
-        process.kill(pid, 'SIGKILL')
-      }
-      catch {}
-      removePidFile()
-      consola.success('Daemon killed')
-      return
-    }
-    setTimeout(poll, 200)
+  while (isProcessRunning(pid) && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200)
   }
-  poll()
+
+  if (isProcessRunning(pid)) {
+    consola.warn('Process did not exit in time, sending SIGKILL')
+    try {
+      process.kill(pid, 'SIGKILL')
+    }
+    catch {}
+  }
+
+  removePidFile()
+  consola.success('Daemon stopped')
 }
 
 export const stop = defineCommand({

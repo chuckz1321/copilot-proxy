@@ -31,7 +31,15 @@ describe('saveDaemonConfig / loadDaemonConfig', () => {
   test('saves config with optional fields', () => {
     const config = { ...sampleConfig, rateLimit: 5, githubToken: 'ghu_xxx' }
     saveDaemonConfig(config)
-    expect(loadDaemonConfig()).toEqual(config)
+    expect(loadDaemonConfig()).toEqual({ ...sampleConfig, rateLimit: 5 })
+  })
+
+  test('does not persist githubToken in file', () => {
+    const config = { ...sampleConfig, githubToken: 'ghu_secret' }
+    saveDaemonConfig(config)
+    const raw = fs.readFileSync(PATHS.DAEMON_JSON, 'utf8')
+    expect(raw).not.toContain('githubToken')
+    expect(raw).not.toContain('ghu_secret')
   })
 
   test('returns null when no config file', () => {
