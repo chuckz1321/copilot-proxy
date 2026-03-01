@@ -20,21 +20,26 @@ export const enable = defineCommand({
     const scriptPath = process.argv[1]
     const args = [scriptPath, 'start', '--_supervisor']
 
+    let success = false
     const { platform } = process
     if (platform === 'linux') {
       const { installAutoStart } = await import('~/daemon/platform/linux')
-      await installAutoStart(execPath, args)
+      success = await installAutoStart(execPath, args)
     }
     else if (platform === 'darwin') {
       const { installAutoStart } = await import('~/daemon/platform/darwin')
-      await installAutoStart(execPath, args)
+      success = await installAutoStart(execPath, args)
     }
     else if (platform === 'win32') {
       const { installAutoStart } = await import('~/daemon/platform/win32')
-      await installAutoStart(execPath, args)
+      success = await installAutoStart(execPath, args)
     }
     else {
       consola.error(`Unsupported platform: ${platform}`)
+      process.exit(1)
+    }
+
+    if (!success) {
       process.exit(1)
     }
   },

@@ -14,7 +14,7 @@ function xmlEscape(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-export async function installAutoStart(execPath: string, args: string[]): Promise<void> {
+export async function installAutoStart(execPath: string, args: string[]): Promise<boolean> {
   const programArgs = [execPath, ...args]
     .map(arg => `        <string>${xmlEscape(arg)}</string>`)
     .join('\n')
@@ -52,6 +52,7 @@ ${programArgs}
   }
 
   consola.success('Auto-start enabled via launchd')
+  return true
 }
 
 export async function uninstallAutoStart(): Promise<void> {

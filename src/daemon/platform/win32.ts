@@ -3,7 +3,7 @@ import consola from 'consola'
 
 const TASK_NAME = 'CopilotProxy'
 
-export async function installAutoStart(execPath: string, args: string[]): Promise<void> {
+export async function installAutoStart(execPath: string, args: string[]): Promise<boolean> {
   const command = `"${execPath}" ${args.join(' ')}`
 
   try {
@@ -22,10 +22,11 @@ export async function installAutoStart(execPath: string, args: string[]): Promis
   }
   catch (error) {
     consola.error('Failed to create scheduled task:', error)
-    return
+    return false
   }
 
   consola.success('Auto-start enabled via Task Scheduler')
+  return true
 }
 
 export async function uninstallAutoStart(): Promise<void> {

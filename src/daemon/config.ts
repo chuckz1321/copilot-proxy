@@ -23,7 +23,27 @@ export function saveDaemonConfig(config: DaemonConfig): void {
 export function loadDaemonConfig(): DaemonConfig | null {
   try {
     const content = fs.readFileSync(PATHS.DAEMON_JSON, 'utf8')
-    return JSON.parse(content) as DaemonConfig
+    const data = JSON.parse(content) as Record<string, unknown>
+
+    // Runtime validation of critical fields
+    if (typeof data.port !== 'number' || data.port <= 0 || data.port > 65535)
+      return null
+    if (typeof data.verbose !== 'boolean')
+      return null
+    if (typeof data.accountType !== 'string')
+      return null
+    if (typeof data.manual !== 'boolean')
+      return null
+    if (typeof data.rateLimitWait !== 'boolean')
+      return null
+    if (typeof data.showToken !== 'boolean')
+      return null
+    if (typeof data.proxyEnv !== 'boolean')
+      return null
+    if (data.rateLimit !== undefined && (typeof data.rateLimit !== 'number' || data.rateLimit <= 0))
+      return null
+
+    return data as unknown as DaemonConfig
   }
   catch {
     return null

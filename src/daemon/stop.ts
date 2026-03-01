@@ -2,17 +2,17 @@ import process from 'node:process'
 import { defineCommand } from 'citty'
 import consola from 'consola'
 
-import { isProcessRunning, readPid, removePidFile } from '~/daemon/pid'
+import { isDaemonRunning, isProcessRunning, removePidFile } from '~/daemon/pid'
 
 function stopDaemon(): void {
-  const info = readPid()
-  if (info === null || !isProcessRunning(info.pid)) {
+  const daemon = isDaemonRunning()
+  if (!daemon.running) {
     consola.info('Daemon is not running')
     removePidFile()
     return
   }
 
-  const pid = info.pid
+  const { pid } = daemon
   consola.info(`Stopping daemon (PID: ${pid})...`)
 
   try {

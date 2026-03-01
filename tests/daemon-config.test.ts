@@ -45,4 +45,23 @@ describe('saveDaemonConfig / loadDaemonConfig', () => {
   test('returns null when no config file', () => {
     expect(loadDaemonConfig()).toBeNull()
   })
+
+  test('returns null for config with invalid port', () => {
+    saveDaemonConfig(sampleConfig)
+    // Overwrite with invalid data
+    fs.writeFileSync(PATHS.DAEMON_JSON, JSON.stringify({ ...sampleConfig, port: 'abc' }))
+    expect(loadDaemonConfig()).toBeNull()
+  })
+
+  test('returns null for config with port out of range', () => {
+    saveDaemonConfig(sampleConfig)
+    fs.writeFileSync(PATHS.DAEMON_JSON, JSON.stringify({ ...sampleConfig, port: 99999 }))
+    expect(loadDaemonConfig()).toBeNull()
+  })
+
+  test('returns null for config with non-boolean verbose', () => {
+    saveDaemonConfig(sampleConfig)
+    fs.writeFileSync(PATHS.DAEMON_JSON, JSON.stringify({ ...sampleConfig, verbose: 'oops' }))
+    expect(loadDaemonConfig()).toBeNull()
+  })
 })

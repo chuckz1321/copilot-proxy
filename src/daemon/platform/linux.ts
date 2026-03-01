@@ -16,14 +16,14 @@ function shellQuote(s: string): string {
   return `"${s.replace(/"/g, '\\"')}"`
 }
 
-export async function installAutoStart(execPath: string, args: string[]): Promise<void> {
+export async function installAutoStart(execPath: string, args: string[]): Promise<boolean> {
   try {
     execSync('which systemctl', { stdio: 'pipe' })
   }
   catch {
     consola.error('systemctl not found. Cannot register systemd service.')
     consola.info('You may need to manually configure auto-start for your init system.')
-    return
+    return false
   }
 
   const unit = `[Unit]
@@ -50,7 +50,7 @@ WantedBy=default.target
   catch {
     consola.error('Failed to reload systemd. Is systemd running in user mode?')
     consola.info('On WSL2, you may need to enable systemd: https://learn.microsoft.com/en-us/windows/wsl/systemd')
-    return
+    return false
   }
 
   try {
@@ -60,7 +60,7 @@ WantedBy=default.target
     consola.error('Failed to enable service:', error instanceof Error ? error.message : error)
     consola.info(`Service file written to: ${SERVICE_PATH}`)
     consola.info('You can try manually: systemctl --user enable --now copilot-proxy')
-    return
+    return false
   }
 
   try {
@@ -71,6 +71,7 @@ WantedBy=default.target
   }
 
   consola.success('Auto-start enabled via systemd')
+  return true
 }
 
 export async function uninstallAutoStart(): Promise<void> {

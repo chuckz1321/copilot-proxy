@@ -201,6 +201,20 @@ export const start = defineCommand({
     },
   },
   async run({ args }) {
+    // Validate numeric arguments
+    const port = Number.parseInt(args.port, 10)
+    if (Number.isNaN(port) || port <= 0 || port > 65535) {
+      consola.error(`Invalid port: ${args.port}`)
+      process.exit(1)
+    }
+
+    const rateLimitRaw = args['rate-limit']
+    const rateLimit = rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
+    if (rateLimitRaw !== undefined && (Number.isNaN(rateLimit!) || rateLimit! <= 0)) {
+      consola.error(`Invalid rate-limit: ${rateLimitRaw}`)
+      process.exit(1)
+    }
+
     if (args._supervisor) {
       const { loadDaemonConfig } = await import('~/daemon/config')
       const config = loadDaemonConfig()
@@ -234,11 +248,9 @@ export const start = defineCommand({
       }
 
       const { daemonStart } = await import('~/daemon/start')
-      const rateLimitRaw = args['rate-limit']
-      const rateLimit = rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
 
       daemonStart({
-        port: Number.parseInt(args.port, 10),
+        port,
         verbose: args.verbose,
         accountType: args['account-type'],
         manual: args.manual,
@@ -251,12 +263,8 @@ export const start = defineCommand({
       return
     }
 
-    const rateLimitRaw = args['rate-limit']
-    const rateLimit
-      = rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
-
     return runServer({
-      port: Number.parseInt(args.port, 10),
+      port,
       verbose: args.verbose,
       accountType: args['account-type'],
       manual: args.manual,
