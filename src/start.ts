@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import type { ServerHandler } from 'srvx'
+import process from 'node:process'
 import { defineCommand } from 'citty'
 import clipboard from 'clipboardy'
 import consola from 'consola'
@@ -15,7 +16,7 @@ import { setupCopilotToken, setupGitHubToken } from './lib/token'
 import { cacheModels, cacheVSCodeVersion } from './lib/utils'
 import { server } from './server'
 
-interface RunServerOptions {
+export interface RunServerOptions {
   port: number
   verbose: boolean
   accountType: string
@@ -187,8 +188,39 @@ export const start = defineCommand({
       default: false,
       description: 'Initialize proxy from environment variables',
     },
+    '_supervisor': {
+      type: 'boolean',
+      default: false,
+      description: 'Internal: run as supervisor (do not use directly)',
+    },
   },
-  run({ args }) {
+  async run({ args }) {
+    if (args._supervisor) {
+      const { loadDaemonConfig } = await import('~/daemon/config')
+      const config = loadDaemonConfig()
+
+      if (!config) {
+        consola.error('Supervisor mode: daemon config not found')
+        process.exit(1)
+      }
+
+      const { runAsSupervisor } = await import('~/daemon/supervisor')
+      const options: RunServerOptions = {
+        port: config.port,
+        verbose: config.verbose,
+        accountType: config.accountType,
+        manual: config.manual,
+        rateLimit: config.rateLimit,
+        rateLimitWait: config.rateLimitWait,
+        githubToken: config.githubToken,
+        claudeCode: false,
+        showToken: config.showToken,
+        proxyEnv: config.proxyEnv,
+      }
+
+      return runAsSupervisor(() => runServer(options))
+    }
+
     const rateLimitRaw = args['rate-limit']
     const rateLimit
       = rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
