@@ -3,8 +3,9 @@ import { defineCommand } from 'citty'
 import consola from 'consola'
 
 import { loadDaemonConfig } from '~/daemon/config'
-import { isDaemonRunning, isProcessRunning, removePidFile } from '~/daemon/pid'
+import { isDaemonRunning } from '~/daemon/pid'
 import { daemonStart } from '~/daemon/start'
+import { stopDaemon } from '~/daemon/stop'
 
 export const restart = defineCommand({
   meta: {
@@ -21,25 +22,10 @@ export const restart = defineCommand({
     // Stop existing daemon if running
     const daemon = isDaemonRunning()
     if (daemon.running) {
-      const { pid } = daemon
-      consola.info(`Stopping daemon (PID: ${pid})...`)
-      try {
-        process.kill(pid, 'SIGTERM')
+      if (!stopDaemon()) {
+        consola.error('Cannot restart: failed to stop existing daemon')
+        process.exit(1)
       }
-      catch {}
-
-      const deadline = Date.now() + 10_000
-      while (isProcessRunning(pid) && Date.now() < deadline) {
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200)
-      }
-
-      if (isProcessRunning(pid)) {
-        try {
-          process.kill(pid, 'SIGKILL')
-        }
-        catch {}
-      }
-      removePidFile()
     }
 
     // Start with saved config

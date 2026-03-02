@@ -12,6 +12,7 @@ const LOCK_PATH = `${PATHS.DAEMON_PID}.lock`
 
 function acquireLock(): boolean {
   try {
+    fs.mkdirSync(PATHS.APP_DIR, { recursive: true })
     // O_CREAT | O_EXCL — fails if file already exists (atomic)
     const fd = fs.openSync(LOCK_PATH, 'wx')
     fs.writeSync(fd, String(process.pid))

@@ -4,12 +4,16 @@ import consola from 'consola'
 
 import { isDaemonRunning, isProcessRunning, removePidFile } from '~/daemon/pid'
 
-function stopDaemon(): void {
+/**
+ * Attempt to stop the daemon. Returns true if daemon was stopped or
+ * was not running. Returns false if the process could not be stopped.
+ */
+export function stopDaemon(): boolean {
   const daemon = isDaemonRunning()
   if (!daemon.running) {
     consola.info('Daemon is not running')
     removePidFile()
-    return
+    return true
   }
 
   const { pid } = daemon
@@ -20,7 +24,7 @@ function stopDaemon(): void {
   }
   catch {
     consola.error('Failed to send SIGTERM')
-    return
+    return false
   }
 
   // Wait for process to exit (poll up to 10s)
@@ -35,10 +39,22 @@ function stopDaemon(): void {
       process.kill(pid, 'SIGKILL')
     }
     catch {}
+
+    // Wait briefly for SIGKILL to take effect
+    const killDeadline = Date.now() + 3_000
+    while (isProcessRunning(pid) && Date.now() < killDeadline) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)
+    }
+
+    if (isProcessRunning(pid)) {
+      consola.error(`Failed to kill process ${pid}`)
+      return false
+    }
   }
 
   removePidFile()
   consola.success('Daemon stopped')
+  return true
 }
 
 export const stop = defineCommand({
@@ -47,6 +63,8 @@ export const stop = defineCommand({
     description: 'Stop the background daemon',
   },
   run() {
-    stopDaemon()
+    if (!stopDaemon()) {
+      process.exit(1)
+    }
   },
 })

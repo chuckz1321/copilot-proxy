@@ -203,14 +203,14 @@ export const start = defineCommand({
   async run({ args }) {
     // Validate numeric arguments
     const port = Number.parseInt(args.port, 10)
-    if (Number.isNaN(port) || port <= 0 || port > 65535) {
+    if (Number.isNaN(port) || port <= 0 || port > 65535 || String(port) !== args.port) {
       consola.error(`Invalid port: ${args.port}`)
       process.exit(1)
     }
 
     const rateLimitRaw = args['rate-limit']
     const rateLimit = rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
-    if (rateLimitRaw !== undefined && (Number.isNaN(rateLimit!) || rateLimit! <= 0)) {
+    if (rateLimitRaw !== undefined && (Number.isNaN(rateLimit!) || rateLimit! <= 0 || String(rateLimit) !== rateLimitRaw)) {
       consola.error(`Invalid rate-limit: ${rateLimitRaw}`)
       process.exit(1)
     }
