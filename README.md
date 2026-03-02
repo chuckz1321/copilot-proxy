@@ -191,7 +191,7 @@ Copilot API now uses a subcommand structure with these main commands:
 - `start`: Start the Copilot API server. This command will also handle authentication if needed. Use `-d` to run as a background daemon.
 - `stop`: Stop the background daemon.
 - `restart`: Restart the background daemon using saved configuration.
-- `status`: Show daemon status (PID, port, uptime).
+- `status`: Show daemon status (PID, port, start time).
 - `logs`: View daemon logs. Use `-f` to follow in real time.
 - `enable`: Register the proxy as an auto-start service (systemd/launchd/Task Scheduler).
 - `disable`: Remove the auto-start service registration.

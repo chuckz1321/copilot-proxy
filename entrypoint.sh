@@ -3,7 +3,7 @@ case "$1" in
   --auth)
     exec bun run dist/main.js auth
     ;;
-  stop|restart|status|logs|enable|disable)
+  auth|check-usage|debug|stop|restart|status|logs|enable|disable)
     exec bun run dist/main.js "$@"
     ;;
   *)
