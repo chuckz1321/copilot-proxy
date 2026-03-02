@@ -44,16 +44,55 @@ function winQuoteArg(arg: string): string {
   return result
 }
 
-export async function installAutoStart(execPath: string, args: string[]): Promise<boolean> {
-  // Use XML task definition for reliable argument handling
+/**
+ * Detect whether conhost --headless is available (Win10 1809+).
+ * Falls back to direct execution on older Windows versions.
+ */
+function supportsHeadlessConhost(): boolean {
+  try {
+    execFileSync('conhost.exe', ['--headless', 'cmd.exe', '/c', 'exit', '0'], {
+      stdio: 'pipe',
+      timeout: 5000,
+    })
+    return true
+  }
+  catch {
+    return false
+  }
+}
+
+interface BuildTaskXmlOptions {
+  // Explicitly set for deterministic tests; undefined keeps runtime detection.
+  useHeadlessConhost?: boolean
+}
+
+export function buildTaskXml(execPath: string, args: string[], options: BuildTaskXmlOptions = {}): string {
   // Each arg is individually quoted for CommandLineToArgvW parsing,
   // then the whole string is XML-escaped for the task XML.
   const xmlArgs = args.map(a => winQuoteArg(a)).join(' ')
-  const taskXml = `<?xml version="1.0" encoding="UTF-16"?>
+
+  // Use conhost --headless to hide console window when available
+  const headless = options.useHeadlessConhost ?? supportsHeadlessConhost()
+  let command: string
+  let commandArgs: string
+  if (headless) {
+    command = 'conhost.exe'
+    commandArgs = `--headless ${winQuoteArg(execPath)} ${xmlArgs}`
+  }
+  else {
+    if (options.useHeadlessConhost === undefined) {
+      consola.warn('conhost --headless not supported, console window may briefly appear on startup')
+    }
+    command = execPath
+    commandArgs = xmlArgs
+  }
+
+  return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
+      <Delay>PT30S</Delay>
     </LogonTrigger>
   </Triggers>
   <Principals>
@@ -62,13 +101,39 @@ export async function installAutoStart(execPath: string, args: string[]): Promis
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
   </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
   <Actions>
     <Exec>
-      <Command>${escapeXmlAttr(execPath)}</Command>
-      <Arguments>${escapeXmlAttr(xmlArgs)}</Arguments>
+      <Command>${escapeXmlAttr(command)}</Command>
+      <Arguments>${escapeXmlAttr(commandArgs)}</Arguments>
     </Exec>
   </Actions>
 </Task>`
+}
+
+export async function installAutoStart(execPath: string, args: string[]): Promise<boolean> {
+  const taskXml = buildTaskXml(execPath, args)
 
   const tmpDir = os.tmpdir()
   const xmlPath = path.join(tmpDir, 'copilot-proxy-task.xml')

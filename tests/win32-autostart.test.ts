@@ -1,0 +1,90 @@
+import { describe, expect, test } from 'bun:test'
+import { buildTaskXml } from '../src/daemon/platform/win32'
+
+describe('buildTaskXml', () => {
+  const execPath = 'C:\\Program Files\\nodejs\\node.exe'
+  const args = ['C:\\Users\\test\\.npm\\copilot-proxy\\main.js', 'start', '--_supervisor']
+
+  function getHeadlessXml() {
+    return buildTaskXml(execPath, args, { useHeadlessConhost: true })
+  }
+
+  function getDirectXml() {
+    return buildTaskXml(execPath, args, { useHeadlessConhost: false })
+  }
+
+  test('uses Task schema version 1.2 for broad compatibility', () => {
+    expect(getHeadlessXml()).toContain('version="1.2"')
+  })
+
+  test('sets ExecutionTimeLimit to PT0S (no timeout)', () => {
+    expect(getHeadlessXml()).toContain('<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>')
+  })
+
+  test('sets logon trigger with 30s delay', () => {
+    const xml = getHeadlessXml()
+    expect(xml).toContain('<LogonTrigger>')
+    expect(xml).toContain('<Delay>PT30S</Delay>')
+  })
+
+  test('prevents multiple instances', () => {
+    expect(getHeadlessXml()).toContain('<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>')
+  })
+
+  test('allows running on battery power', () => {
+    const xml = getHeadlessXml()
+    expect(xml).toContain('<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>')
+    expect(xml).toContain('<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>')
+  })
+
+  test('does not stop when idle', () => {
+    const xml = getHeadlessXml()
+    expect(xml).toContain('<RunOnlyIfIdle>false</RunOnlyIfIdle>')
+    expect(xml).toContain('<StopOnIdleEnd>false</StopOnIdleEnd>')
+  })
+
+  test('enables start-when-available for missed triggers', () => {
+    expect(getHeadlessXml()).toContain('<StartWhenAvailable>true</StartWhenAvailable>')
+  })
+
+  test('configures restart on failure', () => {
+    const xml = getHeadlessXml()
+    expect(xml).toContain('<RestartOnFailure>')
+    expect(xml).toContain('<Interval>PT1M</Interval>')
+    expect(xml).toContain('<Count>3</Count>')
+  })
+
+  test('hides task in Task Scheduler', () => {
+    expect(getHeadlessXml()).toContain('<Hidden>true</Hidden>')
+  })
+
+  test('escapes XML special characters in paths', () => {
+    const xml = buildTaskXml('C:\\node&<>.exe', ['arg with "quotes"'], { useHeadlessConhost: true })
+    expect(xml).toContain('&amp;')
+    expect(xml).toContain('&lt;')
+    expect(xml).toContain('&gt;')
+  })
+
+  test('quotes arguments with spaces for CommandLineToArgvW', () => {
+    const xml = getHeadlessXml()
+    // execPath has spaces ("C:\Program Files\..."), should be quoted in arguments
+    expect(xml).toContain('&quot;C:\\Program Files\\nodejs\\node.exe&quot;')
+  })
+
+  test('uses conhost --headless command when enabled', () => {
+    const xml = getHeadlessXml()
+    expect(xml).toContain('<Command>conhost.exe</Command>')
+    expect(xml).toContain('--headless')
+    expect(xml).toContain('&quot;C:\\Program Files\\nodejs\\node.exe&quot;')
+  })
+
+  test('falls back to direct command when headless is disabled', () => {
+    const xml = getDirectXml()
+    expect(xml).toContain(`<Command>${execPath}</Command>`)
+    expect(xml).not.toContain('<Command>conhost.exe</Command>')
+  })
+
+  test('does not contain DisallowStartOnRemoteAppSession (requires v1.3+)', () => {
+    expect(getHeadlessXml()).not.toContain('DisallowStartOnRemoteAppSession')
+  })
+})
