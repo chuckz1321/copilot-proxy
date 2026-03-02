@@ -1,7 +1,7 @@
 import process from 'node:process'
 import consola from 'consola'
 
-import { removePidFile } from '~/daemon/pid'
+import { removePidFile, writePid } from '~/daemon/pid'
 
 const MAX_BACKOFF_MS = 60_000
 const STABLE_THRESHOLD_MS = 60_000
@@ -9,6 +9,11 @@ const STABLE_THRESHOLD_MS = 60_000
 export async function runAsSupervisor(runFn: () => Promise<void>): Promise<void> {
   let backoffMs = 1000
   let lastStartTime = Date.now()
+
+  // Write PID file so status/stop/restart can find us.
+  // This covers both the start -d path (where parent already wrote it)
+  // and the enable path (where _supervisor is launched directly by the OS).
+  writePid(process.pid)
 
   const cleanup = () => {
     removePidFile()
@@ -26,6 +31,8 @@ export async function runAsSupervisor(runFn: () => Promise<void>): Promise<void>
   }
 
   while (true) {
+    // Self-heal: re-write PID file if it was deleted externally
+    writePid(process.pid)
     lastStartTime = Date.now()
     try {
       await runFn()
