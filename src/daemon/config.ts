@@ -33,7 +33,7 @@ export function loadDaemonConfig(): DaemonConfig | null {
     const data = JSON.parse(content) as Record<string, unknown>
 
     // Runtime validation of critical fields
-    if (typeof data.port !== 'number' || data.port <= 0 || data.port > 65535)
+    if (typeof data.port !== 'number' || !Number.isInteger(data.port) || data.port <= 0 || data.port > 65535)
       return null
     if (typeof data.verbose !== 'boolean')
       return null
@@ -47,7 +47,7 @@ export function loadDaemonConfig(): DaemonConfig | null {
       return null
     if (typeof data.proxyEnv !== 'boolean')
       return null
-    if (data.rateLimit !== undefined && (typeof data.rateLimit !== 'number' || data.rateLimit <= 0))
+    if (data.rateLimit !== undefined && (typeof data.rateLimit !== 'number' || !Number.isInteger(data.rateLimit) || data.rateLimit <= 0))
       return null
 
     return data as unknown as DaemonConfig

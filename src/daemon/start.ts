@@ -83,6 +83,10 @@ export function daemonStart(config: DaemonConfig): void {
     if (config.githubToken) {
       fs.mkdirSync(PATHS.APP_DIR, { recursive: true })
       fs.writeFileSync(PATHS.GITHUB_TOKEN_PATH, config.githubToken, { mode: 0o600 })
+      try {
+        fs.chmodSync(PATHS.GITHUB_TOKEN_PATH, 0o600)
+      }
+      catch {}
     }
 
     // Resolve the executable path

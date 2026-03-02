@@ -1,5 +1,4 @@
 import { Buffer } from 'node:buffer'
-import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import process from 'node:process'
 import { defineCommand } from 'citty'
@@ -33,18 +32,7 @@ export const logs = defineCommand({
     }
 
     if (args.follow) {
-      // Use tail -f on Unix, fs.watchFile fallback on Windows
-      if (process.platform === 'win32') {
-        followLogsWatch()
-      }
-      else {
-        const tail = spawn('tail', ['-f', '-n', args.lines, PATHS.DAEMON_LOG], {
-          stdio: 'inherit',
-        })
-        tail.on('error', () => {
-          followLogsWatch()
-        })
-      }
+      followLogsWatch()
     }
     else {
       const content = fs.readFileSync(PATHS.DAEMON_LOG, 'utf8')

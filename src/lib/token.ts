@@ -26,7 +26,8 @@ export async function setupCopilotToken() {
     consola.info('Copilot token:', token)
   }
 
-  const refreshInterval = Math.max((refresh_in - 60) * 1000, 60_000)
+  const rawInterval = (refresh_in - 60) * 1000
+  const refreshInterval = Number.isFinite(rawInterval) ? Math.max(rawInterval, 60_000) : 60_000
   setInterval(async () => {
     consola.debug('Refreshing Copilot token')
     try {

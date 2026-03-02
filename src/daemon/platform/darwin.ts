@@ -48,7 +48,9 @@ ${programArgs}
     execFileSync('launchctl', ['load', PLIST_PATH])
   }
   catch {
-    consola.warn('launchctl load failed. You may need to load it manually.')
+    consola.error('launchctl load failed. You may need to load it manually.')
+    consola.info(`Plist written to: ${PLIST_PATH}`)
+    return false
   }
 
   consola.success('Auto-start enabled via launchd')

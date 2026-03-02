@@ -215,6 +215,12 @@ export const start = defineCommand({
       process.exit(1)
     }
 
+    const validAccountTypes = ['individual', 'business', 'enterprise']
+    if (!validAccountTypes.includes(args['account-type'])) {
+      consola.error(`Invalid account-type: ${args['account-type']} (must be one of: ${validAccountTypes.join(', ')})`)
+      process.exit(1)
+    }
+
     if (args._supervisor) {
       const { loadDaemonConfig } = await import('~/daemon/config')
       const config = loadDaemonConfig()

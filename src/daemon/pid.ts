@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import process from 'node:process'
 
@@ -64,10 +65,45 @@ export function isProcessRunning(pid: number): boolean {
 }
 
 /**
+ * Check if a running process is actually our daemon supervisor,
+ * by inspecting its command line for the _supervisor flag.
+ */
+function isOurDaemonProcess(pid: number): boolean {
+  try {
+    if (process.platform === 'win32') {
+      const output = execSync(
+        `wmic process where ProcessId=${pid} get CommandLine /format:list`,
+        { stdio: 'pipe', encoding: 'utf8' },
+      )
+      return output.includes('_supervisor')
+    }
+    else {
+      // Linux: /proc/<pid>/cmdline, macOS: ps
+      try {
+        const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+        return cmdline.includes('_supervisor')
+      }
+      catch {
+        // macOS or /proc not available
+        const output = execSync(`ps -p ${pid} -o command=`, {
+          stdio: 'pipe',
+          encoding: 'utf8',
+        })
+        return output.includes('_supervisor')
+      }
+    }
+  }
+  catch {
+    // Can't read process info — can't confirm identity
+    return false
+  }
+}
+
+/**
  * Check if the PID from the PID file is likely still our daemon process.
- * Verifies both that the process is alive AND that it was started around
- * the time we recorded (within 5s tolerance to account for spawn delay).
- * This prevents killing an unrelated process that reused the same PID.
+ * Verifies that the process is alive AND that its command line contains
+ * the _supervisor flag (proving it's our daemon, not a random process
+ * that happens to have the same PID).
  */
 export function isDaemonRunning(): { running: true, pid: number } | { running: false } {
   const info = readPid()
@@ -76,28 +112,9 @@ export function isDaemonRunning(): { running: true, pid: number } | { running: f
   if (!isProcessRunning(info.pid))
     return { running: false }
 
-  // If startTime is 0 (legacy format), we can't verify identity — trust PID
-  if (info.startTime === 0)
-    return { running: true, pid: info.pid }
-
-  // Check if the PID file's start time is plausible.
-  // The PID file is written by the parent process right after spawn.
-  // If the file's recorded time is far in the past (> 1 day difference
-  // from the file's mtime), the PID was likely reused by a different process.
-  try {
-    const stat = fs.statSync(PATHS.DAEMON_PID)
-    const fileMtime = stat.mtimeMs
-    // The recorded startTime should be close to the file's mtime
-    // (within 5s, accounting for spawn delay)
-    if (Math.abs(info.startTime - fileMtime) > 5000) {
-      // PID file was tampered with or is stale
-      return { running: false }
-    }
-  }
-  catch {
-    // Can't stat — treat as not running
+  // Verify the process is actually our daemon by checking its command line
+  if (!isOurDaemonProcess(info.pid))
     return { running: false }
-  }
 
   return { running: true, pid: info.pid }
 }
