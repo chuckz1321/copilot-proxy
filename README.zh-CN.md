@@ -42,6 +42,8 @@
 - **Token 可视化**：`--show-token` 显示 GitHub/Copilot token 便于调试。
 - **灵活认证**：支持交互式登录或直接传入 GitHub token，适用于 CI/CD。
 - **多账号类型**：支持个人、企业、组织三种 Copilot 账户类型。
+- **后台守护模式**：通过 `start -d` 将代理作为后台服务运行，支持崩溃自动恢复与指数退避重启。配合 `stop`、`restart`、`status`、`logs` 管理。
+- **跨平台开机自启**：通过 `enable`/`disable` 注册为系统自启动服务，支持 Linux（systemd）、macOS（launchd）和 Windows（任务计划程序）。
 
 ## 前置要求
 
@@ -184,7 +186,13 @@ npx @jer-y/copilot-proxy@latest auth
 
 Copilot API 使用子命令结构，主要命令如下：
 
-- `start`：启动 Copilot API 服务（必要时会自动认证）。
+- `start`：启动 Copilot API 服务（必要时会自动认证）。使用 `-d` 可作为后台守护进程运行。
+- `stop`：停止后台守护进程。
+- `restart`：使用已保存的配置重启后台守护进程。
+- `status`：查看守护进程状态（PID、端口、运行时间）。
+- `logs`：查看守护进程日志。使用 `-f` 实时跟踪。
+- `enable`：注册为系统自启动服务（systemd / launchd / 任务计划程序）。
+- `disable`：移除自启动服务注册。
 - `auth`：仅进行 GitHub 认证，不启动服务，常用于生成 `--github-token`（CI/CD 场景）。
 - `check-usage`：直接查看 Copilot 使用量/配额（无需启动服务）。
 - `debug`：输出诊断信息，包括版本、运行环境、路径与认证状态。
@@ -205,6 +213,7 @@ Copilot API 使用子命令结构，主要命令如下：
 | --claude-code  | 生成 Claude Code 配置命令                                               | false       | -c   |
 | --show-token   | 在获取/刷新时显示 GitHub/Copilot token                                 | false       | 无   |
 | --proxy-env    | 从环境变量初始化代理（HTTP_PROXY/HTTPS_PROXY 等）                      | false       | 无   |
+| --daemon       | 作为后台守护进程运行，支持崩溃自动恢复                                  | false       | -d   |
 
 ### auth 参数
 
@@ -218,6 +227,13 @@ Copilot API 使用子命令结构，主要命令如下：
 | 参数   | 说明                 | 默认值 | 简写 |
 | ------ | -------------------- | ------ | ---- |
 | --json | 以 JSON 输出调试信息 | false  | 无   |
+
+### logs 参数
+
+| 参数     | 说明           | 默认值 | 简写 |
+| -------- | -------------- | ------ | ---- |
+| --follow | 实时跟踪日志   | false  | -f   |
+| --lines  | 显示行数       | 50     | -n   |
 
 ## API 端点
 
@@ -301,6 +317,33 @@ npx @jer-y/copilot-proxy@latest debug --json
 
 # 从环境变量初始化代理
 npx @jer-y/copilot-proxy@latest start --proxy-env
+
+# 后台守护进程模式启动
+npx @jer-y/copilot-proxy@latest start -d
+
+# 指定端口 + GitHub token 启动守护进程
+npx @jer-y/copilot-proxy@latest start -d --port 8080 --github-token ghp_YOUR_TOKEN
+
+# 查看守护进程状态
+npx @jer-y/copilot-proxy@latest status
+
+# 查看日志（最后 50 行）
+npx @jer-y/copilot-proxy@latest logs
+
+# 实时跟踪日志
+npx @jer-y/copilot-proxy@latest logs -f
+
+# 重启守护进程
+npx @jer-y/copilot-proxy@latest restart
+
+# 停止守护进程
+npx @jer-y/copilot-proxy@latest stop
+
+# 注册为开机自启服务（systemd / launchd / 任务计划程序）
+npx @jer-y/copilot-proxy@latest enable
+
+# 移除开机自启
+npx @jer-y/copilot-proxy@latest disable
 ```
 
 ## 使用用量面板

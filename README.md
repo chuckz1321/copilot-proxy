@@ -42,6 +42,8 @@ A reverse-engineered proxy for the GitHub Copilot API that exposes it as an Open
 - **Token Visibility**: Option to display GitHub and Copilot tokens during authentication and refresh for debugging (`--show-token`).
 - **Flexible Authentication**: Authenticate interactively or provide a GitHub token directly, suitable for CI/CD environments.
 - **Support for Different Account Types**: Works with individual, business, and enterprise GitHub Copilot plans.
+- **Background Daemon Mode**: Run the proxy as a background service with `start -d`, with automatic crash recovery and exponential backoff restart. Manage with `stop`, `restart`, `status`, and `logs` commands.
+- **Cross-Platform Auto-Start**: Register the proxy as an auto-start service on Linux (systemd), macOS (launchd), and Windows (Task Scheduler) with `enable`/`disable` commands.
 
 ## Prerequisites
 
@@ -186,7 +188,13 @@ npx @jer-y/copilot-proxy@latest auth
 
 Copilot API now uses a subcommand structure with these main commands:
 
-- `start`: Start the Copilot API server. This command will also handle authentication if needed.
+- `start`: Start the Copilot API server. This command will also handle authentication if needed. Use `-d` to run as a background daemon.
+- `stop`: Stop the background daemon.
+- `restart`: Restart the background daemon using saved configuration.
+- `status`: Show daemon status (PID, port, uptime).
+- `logs`: View daemon logs. Use `-f` to follow in real time.
+- `enable`: Register the proxy as an auto-start service (systemd/launchd/Task Scheduler).
+- `disable`: Remove the auto-start service registration.
 - `auth`: Run GitHub authentication flow without starting the server. This is typically used if you need to generate a token for use with the `--github-token` option, especially in non-interactive environments.
 - `check-usage`: Show your current GitHub Copilot usage and quota information directly in the terminal (no server required).
 - `debug`: Display diagnostic information including version, runtime details, file paths, and authentication status. Useful for troubleshooting and support.
@@ -209,6 +217,7 @@ The following command line options are available for the `start` command:
 | --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
 | --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
 | --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
+| --daemon       | Run as a background daemon with crash recovery                                | false      | -d    |
 
 ### Auth Command Options
 
@@ -222,6 +231,13 @@ The following command line options are available for the `start` command:
 | Option | Description               | Default | Alias |
 | ------ | ------------------------- | ------- | ----- |
 | --json | Output debug info as JSON | false   | none  |
+
+### Logs Command Options
+
+| Option  | Description           | Default | Alias |
+| ------- | --------------------- | ------- | ----- |
+| --follow | Follow log output    | false   | -f    |
+| --lines  | Number of lines to show | 50   | -n    |
 
 ## API Endpoints
 
@@ -309,6 +325,33 @@ npx @jer-y/copilot-proxy@latest debug --json
 
 # Initialize proxy from environment variables (HTTP_PROXY, HTTPS_PROXY, etc.)
 npx @jer-y/copilot-proxy@latest start --proxy-env
+
+# Start as a background daemon
+npx @jer-y/copilot-proxy@latest start -d
+
+# Start daemon on a custom port with a GitHub token
+npx @jer-y/copilot-proxy@latest start -d --port 8080 --github-token ghp_YOUR_TOKEN
+
+# Check daemon status
+npx @jer-y/copilot-proxy@latest status
+
+# View daemon logs (last 50 lines)
+npx @jer-y/copilot-proxy@latest logs
+
+# Follow daemon logs in real time
+npx @jer-y/copilot-proxy@latest logs -f
+
+# Restart the daemon
+npx @jer-y/copilot-proxy@latest restart
+
+# Stop the daemon
+npx @jer-y/copilot-proxy@latest stop
+
+# Register as auto-start service (systemd/launchd/Task Scheduler)
+npx @jer-y/copilot-proxy@latest enable
+
+# Remove auto-start registration
+npx @jer-y/copilot-proxy@latest disable
 ```
 
 ## Using the Usage Viewer

@@ -5,7 +5,7 @@
 - **Build:**
   `bun run build` (uses tsup)
 - **Dev:**
-  `bun run dev`
+  `bun run dev` (runs `start` subcommand with file watching)
 - **Lint:**
   `bun run lint` (uses @antfu/eslint-config)
 - **Lint & Fix staged files:**
@@ -15,7 +15,9 @@
 - **Test single file:**
    `bun test tests/claude-request.test.ts`
 - **Start (prod):**
-  `bun run start`
+  `bun run start` (runs `start` subcommand in production mode)
+- **Daemon commands:**
+  `bun run ./src/main.ts start -d` (background), `stop`, `restart`, `status`, `logs`, `enable`, `disable`
 
 ## Code Style Guidelines
 
