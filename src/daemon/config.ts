@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import path from 'node:path'
 
 import { PATHS } from '~/lib/paths'
 
@@ -15,6 +16,17 @@ export interface DaemonConfig {
 }
 
 const VALID_ACCOUNT_TYPES = ['individual', 'business', 'enterprise']
+export const MAX_DAEMON_CONFIG_BACKUPS = 5
+
+export type DaemonConfigRecoveryReason = 'missing' | 'invalid' | 'unreadable'
+
+export interface DaemonConfigRecoveryResult {
+  config: DaemonConfig
+  recovered: boolean
+  persisted: boolean
+  reason?: DaemonConfigRecoveryReason
+  backupPath?: string
+}
 
 export function saveDaemonConfig(config: DaemonConfig): void {
   const { githubToken: _removed, ...safeConfig } = config
@@ -31,28 +43,130 @@ export function loadDaemonConfig(): DaemonConfig | null {
   try {
     const content = fs.readFileSync(PATHS.DAEMON_JSON, 'utf8')
     const data = JSON.parse(content) as Record<string, unknown>
-
-    // Runtime validation of critical fields
-    if (typeof data.port !== 'number' || !Number.isInteger(data.port) || data.port <= 0 || data.port > 65535)
-      return null
-    if (typeof data.verbose !== 'boolean')
-      return null
-    if (typeof data.accountType !== 'string' || !VALID_ACCOUNT_TYPES.includes(data.accountType))
-      return null
-    if (typeof data.manual !== 'boolean')
-      return null
-    if (typeof data.rateLimitWait !== 'boolean')
-      return null
-    if (typeof data.showToken !== 'boolean')
-      return null
-    if (typeof data.proxyEnv !== 'boolean')
-      return null
-    if (data.rateLimit !== undefined && (typeof data.rateLimit !== 'number' || !Number.isInteger(data.rateLimit) || data.rateLimit <= 0 || data.rateLimit > 86400))
-      return null
-
-    return data as unknown as DaemonConfig
+    return validateDaemonConfig(data)
   }
   catch {
     return null
   }
+}
+
+export function loadDaemonConfigWithRecovery(fallbackConfig: DaemonConfig): DaemonConfigRecoveryResult {
+  let reason: DaemonConfigRecoveryReason = 'unreadable'
+  let backupPath: string | undefined
+
+  try {
+    const content = fs.readFileSync(PATHS.DAEMON_JSON, 'utf8')
+
+    try {
+      const data = JSON.parse(content) as Record<string, unknown>
+      const validConfig = validateDaemonConfig(data)
+      if (validConfig) {
+        return {
+          config: validConfig,
+          recovered: false,
+          persisted: false,
+        }
+      }
+      reason = 'invalid'
+    }
+    catch {
+      reason = 'invalid'
+    }
+
+    backupPath = backupDaemonConfigFile()
+  }
+  catch (error) {
+    const code = error instanceof Error && 'code' in error ? error.code : undefined
+    if (code === 'ENOENT') {
+      reason = 'missing'
+    }
+    else {
+      reason = 'unreadable'
+      backupPath = backupDaemonConfigFile()
+    }
+  }
+
+  try {
+    saveDaemonConfig(fallbackConfig)
+    return {
+      config: fallbackConfig,
+      recovered: true,
+      persisted: true,
+      reason,
+      backupPath,
+    }
+  }
+  catch {
+    return {
+      config: fallbackConfig,
+      recovered: true,
+      persisted: false,
+      reason,
+      backupPath,
+    }
+  }
+}
+
+function validateDaemonConfig(data: Record<string, unknown>): DaemonConfig | null {
+  // Runtime validation of critical fields
+  if (typeof data.port !== 'number' || !Number.isInteger(data.port) || data.port <= 0 || data.port > 65535)
+    return null
+  if (typeof data.verbose !== 'boolean')
+    return null
+  if (typeof data.accountType !== 'string' || !VALID_ACCOUNT_TYPES.includes(data.accountType))
+    return null
+  if (typeof data.manual !== 'boolean')
+    return null
+  if (typeof data.rateLimitWait !== 'boolean')
+    return null
+  if (typeof data.showToken !== 'boolean')
+    return null
+  if (typeof data.proxyEnv !== 'boolean')
+    return null
+  if (data.rateLimit !== undefined && (typeof data.rateLimit !== 'number' || !Number.isInteger(data.rateLimit) || data.rateLimit <= 0 || data.rateLimit > 86400))
+    return null
+  if (data.githubToken !== undefined && typeof data.githubToken !== 'string')
+    return null
+
+  return data as unknown as DaemonConfig
+}
+
+function backupDaemonConfigFile(): string | undefined {
+  if (!fs.existsSync(PATHS.DAEMON_JSON))
+    return undefined
+
+  const backupPath = `${PATHS.DAEMON_JSON}.bak.${Date.now()}`
+  try {
+    fs.renameSync(PATHS.DAEMON_JSON, backupPath)
+    // Clamp backup file perms to user-only in case source file was overly permissive.
+    try {
+      fs.chmodSync(backupPath, 0o600)
+    }
+    catch {}
+    pruneOldDaemonConfigBackups()
+    return backupPath
+  }
+  catch {
+    return undefined
+  }
+}
+
+function pruneOldDaemonConfigBackups(): void {
+  try {
+    const backups = fs.readdirSync(PATHS.APP_DIR)
+      .filter(name => /^daemon\.json\.bak\.\d+$/.test(name))
+      .sort((a, b) => {
+        const aTs = Number.parseInt(a.slice('daemon.json.bak.'.length), 10)
+        const bTs = Number.parseInt(b.slice('daemon.json.bak.'.length), 10)
+        return bTs - aTs
+      })
+
+    for (const backupName of backups.slice(MAX_DAEMON_CONFIG_BACKUPS)) {
+      try {
+        fs.unlinkSync(path.join(PATHS.APP_DIR, backupName))
+      }
+      catch {}
+    }
+  }
+  catch {}
 }

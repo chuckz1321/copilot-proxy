@@ -1,8 +1,36 @@
+import type { DaemonConfig } from '~/daemon/config'
 import process from 'node:process'
 import { defineCommand } from 'citty'
-import consola from 'consola'
 
+import consola from 'consola'
 import { loadDaemonConfig } from '~/daemon/config'
+
+export function buildSupervisorStartArgs(scriptPath: string, config: DaemonConfig): string[] {
+  const args = [
+    scriptPath,
+    'start',
+    '--_supervisor',
+    '--port',
+    String(config.port),
+    '--account-type',
+    config.accountType,
+  ]
+
+  if (config.verbose)
+    args.push('--verbose')
+  if (config.manual)
+    args.push('--manual')
+  if (config.rateLimit !== undefined)
+    args.push('--rate-limit', String(config.rateLimit))
+  if (config.rateLimitWait)
+    args.push('--wait')
+  if (config.showToken)
+    args.push('--show-token')
+  if (config.proxyEnv)
+    args.push('--proxy-env')
+
+  return args
+}
 
 export const enable = defineCommand({
   meta: {
@@ -18,7 +46,7 @@ export const enable = defineCommand({
 
     const execPath = process.argv[0]
     const scriptPath = process.argv[1]
-    const args = [scriptPath, 'start', '--_supervisor']
+    const args = buildSupervisorStartArgs(scriptPath, config)
 
     let success = false
     const { platform } = process

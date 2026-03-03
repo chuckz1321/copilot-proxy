@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import type { ServerHandler } from 'srvx'
+import type { DaemonConfig } from '~/daemon/config'
 import process from 'node:process'
 import { defineCommand } from 'citty'
 import clipboard from 'clipboardy'
@@ -227,26 +228,35 @@ export const start = defineCommand({
     }
 
     if (args._supervisor) {
-      const { loadDaemonConfig } = await import('~/daemon/config')
-      const config = loadDaemonConfig()
+      const { loadDaemonConfigWithRecovery } = await import('~/daemon/config')
+      const fallbackConfig: DaemonConfig = {
+        port,
+        verbose: args.verbose,
+        accountType: args['account-type'],
+        manual: args.manual,
+        rateLimit,
+        rateLimitWait: args.wait,
+        githubToken: args['github-token'],
+        showToken: args['show-token'],
+        proxyEnv: args['proxy-env'],
+      }
+      const configResult = loadDaemonConfigWithRecovery(fallbackConfig)
 
-      if (!config) {
-        consola.error('Supervisor mode: daemon config not found')
-        process.exit(1)
+      if (configResult.recovered) {
+        const reason = configResult.reason ?? 'unknown'
+        consola.warn(`Supervisor mode: daemon config ${reason}, fallback applied`)
+        if (configResult.backupPath) {
+          consola.warn(`Supervisor mode: backed up previous config to ${configResult.backupPath}`)
+        }
+        if (!configResult.persisted) {
+          consola.warn('Supervisor mode: failed to persist recovered daemon config')
+        }
       }
 
       const { runAsSupervisor } = await import('~/daemon/supervisor')
       const options: RunServerOptions = {
-        port: config.port,
-        verbose: config.verbose,
-        accountType: config.accountType,
-        manual: config.manual,
-        rateLimit: config.rateLimit,
-        rateLimitWait: config.rateLimitWait,
-        githubToken: config.githubToken,
+        ...configResult.config,
         claudeCode: false,
-        showToken: config.showToken,
-        proxyEnv: config.proxyEnv,
       }
 
       return runAsSupervisor(() => runServer(options))
