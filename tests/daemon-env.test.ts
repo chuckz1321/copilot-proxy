@@ -31,6 +31,19 @@ describe('filterEnvForDaemon', () => {
     expect(filtered.NO_PROXY).toBe('localhost')
   })
 
+  test('keeps TLS certificate env vars for corporate CA setups', () => {
+    const env = {
+      PATH: '/usr/bin',
+      NODE_EXTRA_CA_CERTS: '/etc/ssl/custom-ca.pem',
+      SSL_CERT_FILE: '/etc/ssl/custom-ca-bundle.pem',
+      SSL_CERT_DIR: '/etc/ssl/custom-certs',
+    }
+    const filtered = filterEnvForDaemon(env)
+    expect(filtered.NODE_EXTRA_CA_CERTS).toBe('/etc/ssl/custom-ca.pem')
+    expect(filtered.SSL_CERT_FILE).toBe('/etc/ssl/custom-ca-bundle.pem')
+    expect(filtered.SSL_CERT_DIR).toBe('/etc/ssl/custom-certs')
+  })
+
   test('drops unknown env vars', () => {
     const env = {
       PATH: '/usr/bin',

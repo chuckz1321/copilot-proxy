@@ -18,36 +18,52 @@ function writeGithubToken(token: string) {
   return fs.writeFile(PATHS.GITHUB_TOKEN_PATH, token)
 }
 
-let consecutiveFailures = 0
+interface RefreshTokenFailureState {
+  consecutiveFailures: number
+}
 
-export async function refreshTokenWithRetry(): Promise<void> {
+const refreshTokenFailureState: RefreshTokenFailureState = {
+  consecutiveFailures: 0,
+}
+
+interface RefreshTokenWithRetryDeps {
+  fetchToken?: typeof getCopilotToken
+  sleepFn?: typeof sleep
+  failureState?: RefreshTokenFailureState
+}
+
+export async function refreshTokenWithRetry(deps: RefreshTokenWithRetryDeps = {}): Promise<void> {
+  const fetchToken = deps.fetchToken ?? getCopilotToken
+  const sleepFn = deps.sleepFn ?? sleep
+  const failureState = deps.failureState ?? refreshTokenFailureState
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const { token } = await getCopilotToken()
+      const { token } = await fetchToken()
       state.copilotToken = token
       consola.debug('Copilot token refreshed')
       if (state.showToken) {
         consola.info('Refreshed Copilot token:', token)
       }
-      if (consecutiveFailures > 0) {
-        consola.info(`Token refresh recovered after ${consecutiveFailures} consecutive failure(s)`)
+      if (failureState.consecutiveFailures > 0) {
+        consola.info(`Token refresh recovered after ${failureState.consecutiveFailures} consecutive failure(s)`)
       }
-      consecutiveFailures = 0
+      failureState.consecutiveFailures = 0
       return
     }
     catch (error) {
       if (attempt < MAX_RETRIES) {
         const delay = RETRY_DELAYS[attempt] ?? RETRY_DELAYS.at(-1)!
         consola.warn(`Token refresh attempt ${attempt + 1} failed, retrying in ${delay}ms...`, error)
-        await sleep(delay)
+        await sleepFn(delay)
       }
     }
   }
 
-  consecutiveFailures++
+  failureState.consecutiveFailures++
   consola.error(
     `Token refresh failed after ${MAX_RETRIES + 1} attempts`
-    + ` (${consecutiveFailures} consecutive interval failure(s)).`
+    + ` (${failureState.consecutiveFailures} consecutive interval failure(s)).`
     + ` Service may be using a stale token.`,
   )
 }

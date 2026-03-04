@@ -27,6 +27,8 @@ const DAEMON_ENV_ALLOWLIST = [
   'NODE_ENV',
   'NODE_OPTIONS',
   'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
   'BUN_INSTALL',
   // Proxy configuration
   'HTTP_PROXY',

@@ -55,36 +55,28 @@ describe('messages error paths', () => {
   test('rate limit exceeded returns 429', async () => {
     const origRateLimitSeconds = state.rateLimitSeconds
     const origRateLimitWait = state.rateLimitWait
-    const origCopilotToken = state.copilotToken
     const origLastRequestTimestamp = state.lastRequestTimestamp
 
     try {
       state.rateLimitSeconds = 9999
       state.rateLimitWait = false
-      state.copilotToken = 'fake-token'
       state.lastRequestTimestamp = undefined
 
-      const validBody = JSON.stringify({
-        model: 'claude-sonnet-4',
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 100,
-      })
-
-      // First request: passes rate limit check (sets timestamp), but will
-      // fail downstream at createChatCompletions (no real backend) -> 500.
-      // That's fine — we only care that the timestamp gets set.
-      await server.request('/v1/messages', {
+      // First request: passes rate limit check and fails at JSON parsing.
+      // This keeps the test fully local (no upstream network call).
+      const first = await server.request('/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: validBody,
+        body: '<<<not json>>>',
       })
+      expect(first.status).toBe(400)
 
       // Second request: checkRateLimit sees the recent timestamp and
       // throws HTTPError(429) because rateLimitWait is false.
       const res = await server.request('/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: validBody,
+        body: '<<<not json>>>',
       })
 
       expect(res.status).toBe(429)
@@ -92,7 +84,6 @@ describe('messages error paths', () => {
     finally {
       state.rateLimitSeconds = origRateLimitSeconds
       state.rateLimitWait = origRateLimitWait
-      state.copilotToken = origCopilotToken
       state.lastRequestTimestamp = origLastRequestTimestamp
     }
   })
