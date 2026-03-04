@@ -9,6 +9,7 @@ import consola from 'consola'
 import { serve } from 'srvx'
 import invariant from 'tiny-invariant'
 
+import { validateAccountType, validatePort, validateRateLimit } from './lib/cli-validators'
 import { ensurePaths } from './lib/paths'
 import { exitWithPortInUse, isPortInUseError } from './lib/port'
 import { initProxyFromEnv } from './lib/proxy'
@@ -217,23 +218,21 @@ export const start = defineCommand({
     },
   },
   async run({ args }) {
-    // Validate numeric arguments
-    const port = Number.parseInt(args.port, 10)
-    if (Number.isNaN(port) || port <= 0 || port > 65535 || String(port) !== args.port) {
+    const port = validatePort(args.port)
+    if (port === null) {
       consola.error(`Invalid port: ${args.port}`)
       process.exit(1)
     }
 
-    const rateLimitRaw = args['rate-limit']
-    const rateLimit = rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
-    if (rateLimitRaw !== undefined && (Number.isNaN(rateLimit!) || rateLimit! <= 0 || rateLimit! > 86400 || String(rateLimit) !== rateLimitRaw)) {
-      consola.error(`Invalid rate-limit: ${rateLimitRaw} (must be 1-86400)`)
+    const rateLimitResult = validateRateLimit(args['rate-limit'])
+    if (!rateLimitResult.valid) {
+      consola.error(`Invalid rate-limit: ${args['rate-limit']} (must be 1-86400)`)
       process.exit(1)
     }
+    const rateLimit = rateLimitResult.value
 
-    const validAccountTypes = ['individual', 'business', 'enterprise']
-    if (!validAccountTypes.includes(args['account-type'])) {
-      consola.error(`Invalid account-type: ${args['account-type']} (must be one of: ${validAccountTypes.join(', ')})`)
+    if (!validateAccountType(args['account-type'])) {
+      consola.error(`Invalid account-type: ${args['account-type']} (must be one of: individual, business, enterprise)`)
       process.exit(1)
     }
 
