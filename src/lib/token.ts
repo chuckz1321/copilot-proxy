@@ -21,7 +21,7 @@ const MAX_RETRIES = 3
 const RETRY_DELAYS = [1_000, 5_000, 15_000]
 let consecutiveFailures = 0
 
-async function refreshTokenWithRetry(): Promise<void> {
+export async function refreshTokenWithRetry(): Promise<void> {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const { token } = await getCopilotToken()
