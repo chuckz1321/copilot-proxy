@@ -42,12 +42,42 @@ export const EmbeddingRequestSchema = z.object({
 
 // ─── Responses (OpenAI Responses API) ─────────────────────────────
 
+const ResponsesMessageInputSchema = z.object({
+  role: z.string(),
+  content: z.union([z.string(), z.array(z.unknown())]),
+}).passthrough()
+
+const ResponsesFunctionCallInputSchema = z.object({
+  type: z.literal('function_call'),
+  id: z.string(),
+  call_id: z.string(),
+  name: z.string(),
+  arguments: z.string(),
+  status: z.string().optional(),
+}).passthrough()
+
+const ResponsesFunctionCallOutputInputSchema = z.object({
+  type: z.literal('function_call_output'),
+  call_id: z.string(),
+  output: z.string(),
+}).passthrough()
+
+const ResponsesInputItemSchema = z.union([
+  ResponsesFunctionCallInputSchema,
+  ResponsesFunctionCallOutputInputSchema,
+  ResponsesMessageInputSchema,
+])
+
 export const ResponsesPayloadSchema = z.object({
   model: z.string(),
-  input: z.union([z.string(), z.array(z.unknown())]),
+  input: z.union([z.string(), z.array(ResponsesInputItemSchema)]),
+  instructions: z.string().optional(),
   tools: z.array(z.unknown()).optional(),
+  tool_choice: z.unknown().optional(),
   reasoning: z.unknown().optional(),
+  text: z.unknown().optional(),
   stream: z.boolean().optional(),
   temperature: z.number().nullable().optional(),
   top_p: z.number().nullable().optional(),
+  max_output_tokens: z.number().nullable().optional(),
 }).passthrough()

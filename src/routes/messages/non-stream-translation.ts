@@ -88,7 +88,7 @@ export function translateToOpenAI(
   if (payload.thinking?.budget_tokens) {
     reasoning_effort = 'high'
   }
-  else if (modelConfig.thinkingMode !== true && modelConfig.defaultReasoningEffort) {
+  else if (modelConfig.reasoningMode !== 'thinking' && modelConfig.defaultReasoningEffort) {
     reasoning_effort = modelConfig.defaultReasoningEffort
   }
 

@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 
-import { forwardError } from '~/lib/error'
+import { forwardErrorAnthropic } from '~/lib/error'
 
 import { handleCountTokens } from './count-tokens-handler'
 import { handleCompletion } from './handler'
@@ -12,7 +12,7 @@ messageRoutes.post('/', async (c) => {
     return await handleCompletion(c)
   }
   catch (error) {
-    return await forwardError(c, error)
+    return await forwardErrorAnthropic(c, error)
   }
 })
 
@@ -21,6 +21,6 @@ messageRoutes.post('/count_tokens', async (c) => {
     return await handleCountTokens(c)
   }
   catch (error) {
-    return await forwardError(c, error)
+    return await forwardErrorAnthropic(c, error)
   }
 })

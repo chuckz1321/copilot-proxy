@@ -1,6 +1,14 @@
+import { getProbeOverride } from './api-probe'
+
+export type BackendApiType = 'chat-completions' | 'responses'
+
 export interface ModelConfig {
-  /** Whether the model uses thinking mode (drives /responses vs /chat/completions routing) */
-  thinkingMode?: boolean
+  /** Backend API types this model supports */
+  supportedApis: Array<BackendApiType>
+  /** Preferred backend when both are supported */
+  preferredApi?: BackendApiType
+  /** Whether the model uses thinking/reasoning mode; only affects default reasoning logic, not routing */
+  reasoningMode?: 'standard' | 'thinking'
   /** Whether to add copilot_cache_control headers for prompt caching */
   enableCacheControl?: boolean
   /** Default reasoning effort level */
@@ -14,72 +22,142 @@ export interface ModelConfig {
 }
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
+  // Claude models — chat-completions only
   'claude-sonnet-4': {
+    supportedApis: ['chat-completions'],
     enableCacheControl: true,
     defaultReasoningEffort: undefined,
     supportsToolChoice: false,
     supportsParallelToolCalls: false,
   },
   'claude-sonnet-4.5': {
+    supportedApis: ['chat-completions'],
     enableCacheControl: true,
     defaultReasoningEffort: undefined,
     supportsToolChoice: false,
     supportsParallelToolCalls: false,
   },
   'claude-opus-4.5': {
+    supportedApis: ['chat-completions'],
     enableCacheControl: true,
     defaultReasoningEffort: undefined,
     supportsToolChoice: false,
     supportsParallelToolCalls: false,
   },
   'claude-opus-4.6': {
+    supportedApis: ['chat-completions'],
     enableCacheControl: true,
     defaultReasoningEffort: 'high',
     supportedReasoningEfforts: ['low', 'medium', 'high'],
     supportsToolChoice: false,
     supportsParallelToolCalls: true,
   },
+
+  // GPT classic models — chat-completions only
   'gpt-4o': {
+    supportedApis: ['chat-completions'],
     supportsToolChoice: true,
     supportsParallelToolCalls: true,
   },
   'gpt-4.1': {
+    supportedApis: ['chat-completions'],
     supportsToolChoice: true,
     supportsParallelToolCalls: true,
   },
+
+  // GPT-5 base models — both APIs
   'gpt-5': {
-    thinkingMode: true,
+    supportedApis: ['chat-completions', 'responses'],
+    preferredApi: 'chat-completions',
+    reasoningMode: 'thinking',
     supportsToolChoice: true,
     supportsParallelToolCalls: true,
   },
+  'gpt-5.1': {
+    supportedApis: ['chat-completions', 'responses'],
+    preferredApi: 'chat-completions',
+    reasoningMode: 'thinking',
+    supportsToolChoice: true,
+    supportsParallelToolCalls: true,
+  },
+  'gpt-5.2': {
+    supportedApis: ['chat-completions', 'responses'],
+    preferredApi: 'chat-completions',
+    reasoningMode: 'thinking',
+    supportsToolChoice: true,
+    supportsParallelToolCalls: true,
+  },
+  'gpt-5-mini': {
+    supportedApis: ['chat-completions', 'responses'],
+    preferredApi: 'chat-completions',
+    reasoningMode: 'thinking',
+    supportsToolChoice: true,
+    supportsParallelToolCalls: true,
+  },
+
+  // GPT-5.4 — responses only
+  'gpt-5.4': {
+    supportedApis: ['responses'],
+    reasoningMode: 'thinking',
+    supportsToolChoice: true,
+    supportsParallelToolCalls: true,
+  },
+
+  // Codex models — responses only
   'gpt-5.1-codex': {
-    thinkingMode: true,
+    supportedApis: ['responses'],
+    reasoningMode: 'thinking',
     defaultReasoningEffort: 'high',
     supportedReasoningEfforts: ['low', 'medium', 'high'],
     supportsToolChoice: true,
     supportsParallelToolCalls: true,
   },
   'gpt-5.2-codex': {
-    thinkingMode: true,
+    supportedApis: ['responses'],
+    reasoningMode: 'thinking',
     defaultReasoningEffort: 'high',
     supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
     supportsToolChoice: true,
     supportsParallelToolCalls: true,
   },
+  'gpt-5.3-codex': {
+    supportedApis: ['responses'],
+    reasoningMode: 'thinking',
+    defaultReasoningEffort: 'high',
+    supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+    supportsToolChoice: true,
+    supportsParallelToolCalls: true,
+  },
+
+  // o-series — responses only
   'o3-mini': {
-    thinkingMode: true,
+    supportedApis: ['responses'],
+    reasoningMode: 'thinking',
     supportsToolChoice: true,
   },
   'o4-mini': {
-    thinkingMode: true,
+    supportedApis: ['responses'],
+    reasoningMode: 'thinking',
     supportsToolChoice: true,
   },
+
+  // Gemini models — chat-completions only
+  'gemini': {
+    supportedApis: ['chat-completions'],
+    supportsToolChoice: true,
+    supportsParallelToolCalls: true,
+  },
+}
+
+/** Default config for unknown models */
+const DEFAULT_CONFIG: ModelConfig = {
+  supportedApis: ['chat-completions'],
 }
 
 /**
  * Get model-specific configuration.
  * Returns the config for an exact match, or for the base model name (without version suffix).
- * Falls back to an empty config if no match is found.
+ * Falls back to a default config if no match is found.
  */
 export function getModelConfig(modelId: string): ModelConfig {
   // Exact match
@@ -99,15 +177,49 @@ export function getModelConfig(modelId: string): ModelConfig {
 
   // Default: check if it's a Claude model (enable cache control by default)
   if (modelId.startsWith('claude')) {
-    return { enableCacheControl: true, supportsToolChoice: false }
+    return { supportedApis: ['chat-completions'], enableCacheControl: true, supportsToolChoice: false }
   }
 
-  return {}
+  return DEFAULT_CONFIG
 }
 
 /**
- * Check if a model uses thinking mode (and should use /responses endpoint)
+ * Check if a model uses thinking/reasoning mode.
+ * Compat wrapper — only affects reasoning logic, not routing.
  */
 export function isThinkingModeModel(modelId: string): boolean {
-  return getModelConfig(modelId).thinkingMode === true
+  return getModelConfig(modelId).reasoningMode === 'thinking'
+}
+
+/**
+ * Resolve which backend API to use for a given model.
+ *
+ * Strategy:
+ * 1. Check runtime probe cache (overrides static config if model was probed)
+ * 2. Static mapping from MODEL_CONFIGS
+ * 3. Family-based guessing for unknown models
+ */
+export function resolveBackend(modelId: string, requestedApi: BackendApiType): BackendApiType {
+  // Check probe cache first — if we've previously discovered the requested API
+  // is unsupported for this model, use the alternative immediately
+  const probeOverride = getProbeOverride(modelId, requestedApi)
+  if (probeOverride) {
+    return probeOverride
+  }
+
+  const config = getModelConfig(modelId)
+  const supported = config.supportedApis
+
+  // If model supports the requested API, use it directly
+  if (supported.includes(requestedApi)) {
+    return requestedApi
+  }
+
+  // Otherwise, use whatever the model supports
+  if (supported.length === 1) {
+    return supported[0]
+  }
+
+  // Both supported — use preferred or fall back to requested
+  return config.preferredApi ?? requestedApi
 }

@@ -5,6 +5,11 @@ import { copilotBaseUrl, copilotHeaders } from '~/lib/api-config'
 import { HTTPError } from '~/lib/error'
 import { state } from '~/lib/state'
 
+/** Type guard: is a message input item (has role, not a function_call/output) */
+function isMessageInput(item: ResponsesInputItem): item is ResponsesMessageInputItem {
+  return 'role' in item && !('type' in item)
+}
+
 export async function createResponses(payload: ResponsesPayload) {
   if (!state.copilotToken)
     throw new Error('Copilot token not found')
@@ -13,7 +18,8 @@ export async function createResponses(payload: ResponsesPayload) {
   const hasVision = inputArray.length > 0 && hasVisionInput(inputArray)
 
   const isAgentCall = inputArray.some(item =>
-    ['assistant'].includes(item.role),
+    (isMessageInput(item) && item.role === 'assistant')
+    || ('type' in item && item.type === 'function_call'),
   )
 
   const headers: Record<string, string> = {
@@ -48,7 +54,7 @@ function hasVisionInput(input: Array<ResponsesInputItem>): boolean {
   ])
 
   return input.some((item) => {
-    if (!Array.isArray(item.content)) {
+    if (!isMessageInput(item) || !Array.isArray(item.content)) {
       return false
     }
     return item.content.some(part => visionTypes.has(part.type))
@@ -57,15 +63,24 @@ function hasVisionInput(input: Array<ResponsesInputItem>): boolean {
 
 // Payload types
 
+export type ResponsesToolChoice = 'none' | 'auto' | 'required' | { type: 'function', name: string }
+
+export interface ResponsesTextConfig {
+  format?: { type: 'text' | 'json_object' | string }
+  verbosity?: 'medium'
+}
+
 export interface ResponsesPayload {
   model: string
   instructions?: string
   input: string | Array<ResponsesInputItem>
   tools?: Array<ResponsesTool>
+  tool_choice?: ResponsesToolChoice
   reasoning?: {
     effort?: 'low' | 'medium' | 'high' | 'xhigh'
     summary?: 'auto' | 'concise' | 'detailed' | 'none'
   }
+  text?: ResponsesTextConfig
   parallel_tool_calls?: boolean
   store?: boolean
   stream?: boolean
@@ -75,11 +90,33 @@ export interface ResponsesPayload {
   max_output_tokens?: number | null
 }
 
-export interface ResponsesInputItem {
+// Input item types (discriminated union)
+
+export interface ResponsesMessageInputItem {
   role: 'user' | 'assistant' | 'system' | 'developer'
   content: string | Array<{ type: string, [key: string]: unknown }>
   [key: string]: unknown
 }
+
+export interface ResponsesFunctionCallItem {
+  type: 'function_call'
+  id: string
+  call_id: string
+  name: string
+  arguments: string
+  status?: 'completed' | 'in_progress'
+}
+
+export interface ResponsesFunctionCallOutputItem {
+  type: 'function_call_output'
+  call_id: string
+  output: string
+}
+
+export type ResponsesInputItem
+  = | ResponsesMessageInputItem
+    | ResponsesFunctionCallItem
+    | ResponsesFunctionCallOutputItem
 
 export interface ResponsesTool {
   type: 'function'
@@ -91,6 +128,12 @@ export interface ResponsesTool {
 
 // Response types
 
+export interface ResponsesResponseError {
+  message: string
+  type?: string
+  code?: string
+}
+
 export interface ResponsesResponse {
   id: string
   object: 'response'
@@ -100,13 +143,18 @@ export interface ResponsesResponse {
     input_tokens: number
     output_tokens: number
     total_tokens: number
+    input_tokens_details?: { cached_tokens: number }
+    output_tokens_details?: { reasoning_tokens: number }
   }
   status: 'completed' | 'failed' | 'incomplete' | 'in_progress'
+  error?: ResponsesResponseError | null
+  incomplete_details?: { reason?: string } | null
 }
 
 export interface ResponsesOutputItem {
   type: 'message' | 'function_call' | 'reasoning'
   id?: string
+  status?: 'completed' | 'in_progress'
   // For message type
   role?: 'assistant'
   content?: Array<{ type: 'output_text', text: string }>
@@ -117,3 +165,18 @@ export interface ResponsesOutputItem {
   // For reasoning type
   summary?: Array<{ type: 'summary_text', text: string }>
 }
+
+// Stream event types (discriminated union)
+
+export type ResponsesStreamEvent
+  = | { type: 'response.created', response: ResponsesResponse }
+    | { type: 'response.in_progress', response: ResponsesResponse }
+    | { type: 'response.output_item.added', output_index: number, item: ResponsesOutputItem }
+    | { type: 'response.output_text.delta', output_index: number, content_index: number, delta: string }
+    | { type: 'response.function_call_arguments.delta', output_index: number, item_id: string, delta: string }
+    | { type: 'response.content_part.added', output_index: number, content_index: number, part: Record<string, unknown> }
+    | { type: 'response.content_part.done', output_index: number, content_index: number, part: Record<string, unknown> }
+    | { type: 'response.output_item.done', output_index: number, item: ResponsesOutputItem }
+    | { type: 'response.completed', response: ResponsesResponse }
+    | { type: 'response.failed', response: ResponsesResponse }
+    | { type: 'error', error: ResponsesResponseError }
