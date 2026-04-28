@@ -132,7 +132,7 @@ describe('Variant routing integration', () => {
     expect(result.reasoning_effort).toBe('max')
   })
 
-  test('claude-opus-4.7 uses medium adaptive reasoning and omits forced tool_choice on chat fallback', () => {
+  test('claude-opus-4.7 uses medium adaptive reasoning and omits forced tool_choice when translated to chat-completions', () => {
     const result = translateToOpenAI(makePayload('claude-opus-4.7', {
       thinking: { type: 'adaptive' },
       tool_choice: { type: 'any', disable_parallel_tool_use: true },

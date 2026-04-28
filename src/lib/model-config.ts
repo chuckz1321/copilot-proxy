@@ -20,8 +20,10 @@ export interface ModelConfig {
 }
 
 const MODEL_CONFIGS: Record<string, ModelConfig> = {
-  // Claude models — prefer native Anthropic Messages passthrough, with
-  // chat-completions available as a proven fallback.
+  // Claude models — use native Anthropic Messages passthrough for /v1/messages
+  // clients; chat-completions remains in supportedApis so that direct
+  // /chat/completions clients can still reach these models. The proxy does NOT
+  // translate /v1/messages or /responses requests into chat-completions.
   'claude-sonnet-4': {
     supportedApis: ['anthropic-messages', 'chat-completions'],
     preferredApi: 'anthropic-messages',
@@ -221,7 +223,9 @@ export function getModelConfig(modelId: string): ModelConfig {
     }
   }
 
-  // Default: check if it's a Claude model (native passthrough with chat fallback)
+  // Default for unknown Claude models — same shape as the explicit Claude
+  // entries above: native /v1/messages for Anthropic clients, plus
+  // chat-completions so that /chat/completions clients can still reach them.
   if (modelId.startsWith('claude')) {
     return {
       supportedApis: ['anthropic-messages', 'chat-completions'],
@@ -240,27 +244,4 @@ export function getModelConfig(modelId: string): ModelConfig {
  */
 export function isThinkingModeModel(modelId: string): boolean {
   return getModelConfig(modelId).reasoningMode === 'thinking'
-}
-
-/**
- * Resolve the static preferred backend for a given model.
- *
- * Runtime probe cache and unsupported fallback are handled by backend-plan.
- * This helper only answers "which supported backend should be preferred first?"
- */
-export function resolveBackend(modelId: string, requestedApi: BackendApiType): BackendApiType {
-  return resolveBackendForConfig(getModelConfig(modelId), requestedApi)
-}
-
-export function resolveBackendForConfig(
-  config: ModelConfig,
-  requestedApi: BackendApiType,
-): BackendApiType {
-  if (config.supportedApis.includes(requestedApi))
-    return requestedApi
-
-  if (config.preferredApi && config.supportedApis.includes(config.preferredApi))
-    return config.preferredApi
-
-  return config.supportedApis[0] ?? requestedApi
 }

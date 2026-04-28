@@ -3,13 +3,11 @@ import type { Context } from 'hono'
 import type { SSEMessage } from 'hono/streaming'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { AnthropicStreamEventData } from '~/lib/translation/types'
-import type { ChatCompletionResponse } from '~/services/copilot/create-chat-completions'
 import type { ResponsesPayload, ResponsesResponse } from '~/services/copilot/create-responses'
 import consola from 'consola'
 
 import { streamSSE } from 'hono/streaming'
 import { awaitApproval } from '~/lib/approval'
-import { runBackendPlan } from '~/lib/backend-plan'
 import { JSONResponseError } from '~/lib/error'
 import { findModelMaxOutputTokens } from '~/lib/model-utils'
 import {
@@ -18,23 +16,18 @@ import {
   throwOpenAIInvalidRequestError,
 } from '~/lib/openai-compat'
 import { checkRateLimit } from '~/lib/rate-limit'
-import { planResponsesBackends } from '~/lib/routing-policy'
+import { assertResponsesPayloadTranslatable, resolveRoute } from '~/lib/routing-policy'
 import { ResponsesPayloadSchema } from '~/lib/schemas'
 import { state } from '~/lib/state'
 import {
   createAnthropicToResponsesStreamState,
-  createCCToResponsesStreamState,
   translateAnthropicResponseToResponses,
   translateAnthropicStreamEventToResponses,
-  translateCCResponseToResponses,
-  translateCCStreamChunkToResponses,
-  translateResponsesRequestToCC,
 } from '~/lib/translation'
 import { translateResponsesRequestToAnthropic } from '~/lib/translation/responses-to-anthropic'
 import { forwardUpstreamHeaders } from '~/lib/upstream-headers'
 import { validateBody } from '~/lib/validate'
 import { createAnthropicMessages } from '~/services/copilot/create-anthropic-messages'
-import { createChatCompletions } from '~/services/copilot/create-chat-completions'
 import { createResponses, forwardResponsesEndpoint, summarizeResponsesPayload } from '~/services/copilot/create-responses'
 
 export async function handleResponses(c: Context) {
@@ -54,44 +47,21 @@ export async function handleResponses(c: Context) {
     await awaitApproval()
   }
 
-  const routingPolicy = planResponsesBackends(payload.model, payload)
-
-  if (routingPolicy.localError) {
-    throwInvalidResponsesRequest(routingPolicy.localError)
-  }
-
-  if (
-    routingPolicy.resolvedBackend === 'anthropic-messages'
-    && routingPolicy.steps[0]?.api !== 'anthropic-messages'
-    && routingPolicy.steps[0]?.context
-  ) {
-    consola.debug(`Skipping Anthropic path for ${payload.model} due to ${routingPolicy.steps[0].context}`)
-  }
-
-  const steps = routingPolicy.steps.map(step => ({
-    ...step,
-    run: async () => {
-      switch (step.api) {
-        case 'anthropic-messages':
-          return await handleViaAnthropic(c, payload)
-        case 'chat-completions':
-          return await handleViaChatCompletions(c, payload)
-        case 'responses':
-          return await handleViaResponses(c, payload)
-      }
-    },
-  }))
+  const route = resolveRoute('responses', payload.model, throwInvalidResponsesRequest)
 
   try {
-    return await runBackendPlan({
-      model: payload.model,
-      steps,
-      onAllUnsupported: routingPolicy.exhaustedError
-        ? () => {
-            throwInvalidResponsesRequest(routingPolicy.exhaustedError!)
-          }
-        : undefined,
-    })
+    switch (route.backend) {
+      case 'responses':
+        return await handleViaResponses(c, payload)
+      case 'anthropic-messages':
+        assertResponsesPayloadTranslatable(payload, throwInvalidResponsesRequest)
+        return await handleViaAnthropic(c, payload)
+      case 'chat-completions':
+        // Unreachable: resolveRoute() never returns chat-completions for a Responses client.
+        throwInvalidResponsesRequest(
+          `Model ${payload.model} cannot be served via /responses (would require translating to /chat/completions, which is disallowed).`,
+        )
+    }
   }
   catch (error) {
     if (error instanceof Error && error.name === 'AbortError')
@@ -137,7 +107,7 @@ export async function handleResponsesPassthrough(
     responseHeaders['x-request-id'] = requestId
   }
 
-  return c.body(response.body, response.status as ContentfulStatusCode, responseHeaders)
+  return c.body(response.body as ReadableStream, response.status as ContentfulStatusCode, responseHeaders)
 }
 
 /** Direct path: model supports responses API */
@@ -174,66 +144,6 @@ async function handleViaResponses(c: Context, payload: ResponsesPayload) {
   })
 }
 
-/** Translation path: model only supports chat-completions, translate Responses ↔ CC */
-async function handleViaChatCompletions(c: Context, payload: ResponsesPayload) {
-  const ccPayload = translateResponsesRequestToCC(payload)
-  if (consola.level >= 4) {
-    consola.debug('Translated Responses→CC payload:', JSON.stringify(ccPayload).slice(-400))
-  }
-
-  const result = await createChatCompletions(ccPayload)
-
-  if (isCCNonStreaming(result.body)) {
-    if (consola.level >= 4) {
-      consola.debug('Non-streaming CC response (translated):', JSON.stringify(result.body))
-    }
-    const responsesResponse = translateCCResponseToResponses(result.body)
-    forwardUpstreamHeaders(c, result.headers)
-    return c.json(responsesResponse)
-  }
-
-  // Streaming translation (CC chunks → Responses stream events)
-  consola.debug('Streaming CC response (translated to Responses events)')
-  forwardUpstreamHeaders(c, result.headers)
-  const streamBody = result.body
-  return streamSSE(c, async (stream) => {
-    const streamState = createCCToResponsesStreamState()
-
-    try {
-      for await (const rawEvent of streamBody) {
-        if (stream.aborted)
-          break
-        if (rawEvent.data === '[DONE]')
-          break
-        if (!rawEvent.data)
-          continue
-
-        let chunk
-        try {
-          chunk = JSON.parse(rawEvent.data)
-        }
-        catch {
-          consola.error('Failed to parse CC stream chunk:', rawEvent.data)
-          continue
-        }
-
-        const responsesEvents = translateCCStreamChunkToResponses(chunk, streamState)
-        for (const evt of responsesEvents) {
-          await stream.writeSSE({
-            event: evt.type,
-            data: JSON.stringify(evt),
-          })
-        }
-      }
-    }
-    catch (error) {
-      if (error instanceof Error && error.name === 'AbortError')
-        return
-      throw error
-    }
-  })
-}
-
 function throwInvalidResponsesRequest(message: string): never {
   throw new JSONResponseError(message, 400, {
     error: {
@@ -245,10 +155,6 @@ function throwInvalidResponsesRequest(message: string): never {
 
 function isResponsesNonStreaming(body: Awaited<ReturnType<typeof createResponses>>['body']): body is ResponsesResponse {
   return Object.hasOwn(body, 'output')
-}
-
-function isCCNonStreaming(body: Awaited<ReturnType<typeof createChatCompletions>>['body']): body is ChatCompletionResponse {
-  return Object.hasOwn(body, 'choices')
 }
 
 /** Translation path: model supports Anthropic Messages API, translate Responses ↔ Anthropic */

@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
-import { clearProbeCache } from '~/lib/api-probe'
 import { state } from '~/lib/state'
 import { server } from '~/server'
 
@@ -109,7 +108,6 @@ const fetchMock = mock(defaultFetchMock)
 beforeEach(() => {
   fetchMock.mockReset()
   fetchMock.mockImplementation(defaultFetchMock)
-  clearProbeCache()
   state.lastRequestTimestamp = undefined
   state.copilotToken = 'test-token'
   state.vsCodeVersion = '1.0.0'
@@ -120,7 +118,20 @@ beforeEach(() => {
 })
 
 describe('messages route upstream adaptation', () => {
-  test('Claude json_object requests are routed to chat-completions instead of native /v1/messages', async () => {
+  test('Claude json_object requests are forwarded natively (proxy no longer translates to chat-completions)', async () => {
+    fetchMock.mockImplementationOnce(async (url: string) => {
+      if (!url.endsWith('/v1/messages')) {
+        throw new Error(`Unexpected upstream URL: ${url}`)
+      }
+      return new Response(JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'output_config.format json_object: not supported',
+        },
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+    })
+
     const res = await server.request('/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -128,27 +139,16 @@ describe('messages route upstream adaptation', () => {
         model: 'claude-opus-4.6',
         max_tokens: 64,
         messages: [{ role: 'user', content: 'Return JSON.' }],
-        output_config: {
-          format: {
-            type: 'json_object',
-          },
-        },
+        output_config: { format: { type: 'json_object' } },
       }),
     })
 
-    expect(res.status).toBe(200)
+    // Native upstream is allowed to surface its own rejection. The proxy no
+    // longer fabricates a chat-completions fallback for unsupported features.
+    expect(res.status).toBe(400)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toBe('https://api.githubcopilot.com/chat/completions')
-
-    const forwardedPayload = JSON.parse(String(init?.body)) as {
-      response_format?: { type?: string }
-      model?: string
-    }
-
-    expect(forwardedPayload.model).toBe('claude-opus-4.6')
-    expect(forwardedPayload.response_format).toEqual({ type: 'json_object' })
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://api.githubcopilot.com/v1/messages')
   })
 
   test('Responses-backed json_object requests are forwarded to /responses with text.format', async () => {
@@ -436,34 +436,20 @@ describe('messages route upstream adaptation', () => {
     expect(body).toContain('event: message_stop')
   })
 
-  test('Claude falls back to chat-completions when native /v1/messages is unsupported and caches the probe result', async () => {
-    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/v1/messages')) {
-        return new Response(JSON.stringify({
-          error: {
-            message: 'unsupported_api_for_model',
-            code: 'unsupported_api_for_model',
-          },
-        }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        })
+  test('Claude native /v1/messages errors are surfaced verbatim (no automatic chat-completions fallback)', async () => {
+    fetchMock.mockImplementationOnce(async (url: string) => {
+      if (!url.endsWith('/v1/messages')) {
+        throw new Error(`Unexpected upstream URL: ${url}`)
       }
-
-      if (url.endsWith('/chat/completions')) {
-        return new Response([
-          'data: {"id":"chatcmpl_fallback_stream","object":"chat.completion.chunk","created":0,"model":"claude-opus-4.6","choices":[{"index":0,"delta":{"content":"fallback ok"},"finish_reason":"stop","logprobs":null}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}\n\n',
-          'data: [DONE]\n\n',
-        ].join(''), {
-          status: 200,
-          headers: { 'Content-Type': 'text/event-stream' },
-        })
-      }
-
-      throw new Error(`Unexpected upstream URL: ${url} body=${String(init?.body)}`)
+      return new Response(JSON.stringify({
+        error: {
+          message: 'unsupported_api_for_model',
+          code: 'unsupported_api_for_model',
+        },
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     })
 
-    const makeRequest = () => server.request('/v1/messages', {
+    const res = await server.request('/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -473,20 +459,10 @@ describe('messages route upstream adaptation', () => {
       }),
     })
 
-    const first = await makeRequest()
-    expect(first.status).toBe(200)
-    const firstBody = await first.json() as { content?: Array<{ text?: string, type?: string }> }
-    expect(firstBody.content).toEqual([{ type: 'text', text: 'fallback ok' }])
-
-    const second = await makeRequest()
-    expect(second.status).toBe(200)
-
-    const calledUrls = fetchMock.mock.calls.map(call => call[0] as string)
-    expect(calledUrls).toEqual([
-      'https://api.githubcopilot.com/v1/messages',
-      'https://api.githubcopilot.com/chat/completions',
-      'https://api.githubcopilot.com/chat/completions',
-    ])
+    expect(res.status).toBe(400)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://api.githubcopilot.com/v1/messages')
   })
 
   test('Claude native passthrough synthesizes message_stop when upstream stream terminates after visible text', async () => {
@@ -1094,16 +1070,21 @@ describe('messages route upstream adaptation', () => {
     expect(forwardedPayload.thinking).toEqual({ type: 'adaptive', display: 'omitted' })
   })
 
-  test('Claude document URL requests bypass native passthrough and expand locally', async () => {
-    fetchMock.mockImplementation(async (url, init) => {
-      if (url === 'https://example.com/doc.txt') {
-        return new Response('The capital of France is Paris.', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-        })
+  test('Claude document URL requests are forwarded natively (proxy no longer expands them locally)', async () => {
+    // Native /v1/messages will reject URL-backed documents itself; the proxy
+    // simply forwards. We mock the upstream returning a 4xx and assert the
+    // proxy did not pre-fetch the URL or fall back to chat-completions.
+    fetchMock.mockImplementationOnce(async (url: string) => {
+      if (!url.endsWith('/v1/messages')) {
+        throw new Error(`Unexpected upstream URL: ${url}`)
       }
-
-      return defaultFetchMock(url, init)
+      return new Response(JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'document.source.type=url is not supported',
+        },
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     })
 
     const res = await server.request('/v1/messages', {
@@ -1125,17 +1106,26 @@ describe('messages route upstream adaptation', () => {
       }),
     })
 
-    expect(res.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-
-    const calledUrls = fetchMock.mock.calls.map(([url]) => String(url))
-    expect(calledUrls).toEqual([
-      'https://example.com/doc.txt',
-      'https://api.githubcopilot.com/chat/completions',
-    ])
+    expect(res.status).toBe(400)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://api.githubcopilot.com/v1/messages')
   })
 
-  test('/v1/responses routes Claude json_object requests to /chat/completions only', async () => {
+  test('/v1/responses Claude json_object requests are translated to /v1/messages and surface upstream rejection', async () => {
+    fetchMock.mockImplementationOnce(async (url: string) => {
+      if (!url.endsWith('/v1/messages')) {
+        throw new Error(`Unexpected upstream URL: ${url}`)
+      }
+      return new Response(JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'output_config.format json_object: not supported',
+        },
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+    })
+
     const res = await server.request('/v1/responses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1150,18 +1140,13 @@ describe('messages route upstream adaptation', () => {
       }),
     })
 
-    expect(res.status).toBe(200)
+    // Claude does not advertise /responses, so /v1/responses requests are
+    // translated to /v1/messages. The proxy no longer falls back to
+    // chat-completions when v1/messages cannot honor json_object.
+    expect(res.status).toBe(400)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toBe('https://api.githubcopilot.com/chat/completions')
-
-    const forwardedPayload = JSON.parse(String(init?.body)) as {
-      response_format?: { type?: string }
-      model?: string
-    }
-    expect(forwardedPayload.model).toBe('claude-opus-4.6')
-    expect(forwardedPayload.response_format).toEqual({ type: 'json_object' })
+    const [url] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://api.githubcopilot.com/v1/messages')
   })
 
   test('count_tokens with document blocks returns default when model not found', async () => {
@@ -1199,6 +1184,5 @@ describe('messages route upstream adaptation', () => {
 })
 
 afterEach(() => {
-  clearProbeCache()
   globalThis.fetch = originalFetch
 })

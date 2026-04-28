@@ -2,31 +2,26 @@ import type { Context } from 'hono'
 
 import type { SSEMessage } from 'hono/streaming'
 import type { ChatCompletionResponse, ChatCompletionsPayload } from '~/services/copilot/create-chat-completions'
-import type { ResponsesResponse, ResponsesStreamEvent } from '~/services/copilot/create-responses'
 import consola from 'consola'
 
 import { streamSSE } from 'hono/streaming'
 import { awaitApproval } from '~/lib/approval'
-import { runBackendPlan } from '~/lib/backend-plan'
-import { JSONResponseError } from '~/lib/error'
 import {
   chatCompletionsHasExternalImageUrls,
   OPENAI_EXTERNAL_IMAGE_URLS_UNSUPPORTED_MESSAGE,
   throwOpenAIInvalidRequestError,
 } from '~/lib/openai-compat'
 import { checkRateLimit } from '~/lib/rate-limit'
-import { planChatCompletionsBackends } from '~/lib/routing-policy'
+import { resolveRoute } from '~/lib/routing-policy'
 import { ChatCompletionsPayloadSchema } from '~/lib/schemas'
 import { state } from '~/lib/state'
 import { getTokenCount } from '~/lib/tokenizer'
-import { createResponsesToCCStreamState, translateCCRequestToResponses, translateResponsesResponseToCC, translateResponsesStreamEventToCC } from '~/lib/translation'
 import { forwardUpstreamHeaders } from '~/lib/upstream-headers'
 import { isNullish } from '~/lib/utils'
 import { validateBody } from '~/lib/validate'
 import {
   createChatCompletions,
 } from '~/services/copilot/create-chat-completions'
-import { createResponses } from '~/services/copilot/create-responses'
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)
@@ -72,26 +67,17 @@ export async function handleCompletion(c: Context) {
     }
   }
 
-  const routingPolicy = planChatCompletionsBackends(payload.model)
-  const steps = routingPolicy.steps.map(step => ({
-    ...step,
-    run: async () => {
-      switch (step.api) {
-        case 'chat-completions':
-          return await handleViaChatCompletions(c, payload)
-        case 'responses':
-          return await handleViaResponses(c, payload)
-        case 'anthropic-messages':
-          throw new Error('anthropic-messages is not routable from chat-completions')
-      }
-    },
-  }))
+  const route = resolveRoute('chat-completions', payload.model, throwOpenAIInvalidRequestError)
+  // chat-completions clients only ever route to chat-completions backend.
+  // resolveRoute() throws 4xx if the model does not list chat-completions in its supportedApis.
+  if (route.backend !== 'chat-completions' || route.kind !== 'direct') {
+    throwOpenAIInvalidRequestError(
+      `Model ${payload.model} cannot be served via /chat/completions. The proxy does not translate from chat-completions to other backends.`,
+    )
+  }
 
   try {
-    return await runBackendPlan({
-      model: payload.model,
-      steps,
-    })
+    return await handleViaChatCompletions(c, payload)
   }
   catch (error) {
     if (error instanceof Error && error.name === 'AbortError')
@@ -134,92 +120,6 @@ async function handleViaChatCompletions(c: Context, payload: ChatCompletionsPayl
   })
 }
 
-/** Translation path: model only supports responses API, translate CC ↔ Responses */
-async function handleViaResponses(c: Context, payload: ChatCompletionsPayload) {
-  const responsesPayload = translateCCRequestToResponses(payload)
-  if (consola.level >= 4) {
-    consola.debug('Translated CC→Responses payload:', JSON.stringify(responsesPayload).slice(-400))
-  }
-
-  const result = await createResponses(responsesPayload)
-
-  if (isResponsesNonStreaming(result.body)) {
-    if (consola.level >= 4) {
-      consola.debug('Non-streaming responses (translated):', JSON.stringify(result.body))
-    }
-    const ccResponse = translateResponsesResponseToCC(result.body)
-    forwardUpstreamHeaders(c, result.headers)
-    return c.json(ccResponse)
-  }
-
-  // TODO: Phase 3 — streaming translation (Responses stream → CC chunks)
-  consola.debug('Streaming responses (translated to CC chunks)')
-  forwardUpstreamHeaders(c, result.headers)
-  const streamBody = result.body
-  return streamSSE(c, async (stream) => {
-    const streamState = createResponsesToCCStreamState()
-
-    try {
-      for await (const rawEvent of streamBody) {
-        if (stream.aborted)
-          break
-        if (rawEvent.data === '[DONE]')
-          break
-        if (!rawEvent.data)
-          continue
-
-        let event: ResponsesStreamEvent
-        try {
-          event = JSON.parse(rawEvent.data) as ResponsesStreamEvent
-        }
-        catch {
-          consola.error('Failed to parse Responses stream event:', rawEvent.data)
-          await stream.writeSSE({
-            data: JSON.stringify({
-              error: {
-                message: 'Failed to parse Responses stream event.',
-                type: 'api_error',
-              },
-            }),
-          })
-          return
-        }
-
-        let ccChunks
-        try {
-          ccChunks = translateResponsesStreamEventToCC(event, streamState)
-        }
-        catch (error) {
-          if (error instanceof JSONResponseError) {
-            await stream.writeSSE({
-              data: JSON.stringify(error.payload),
-            })
-            return
-          }
-          throw error
-        }
-
-        for (const chunk of ccChunks) {
-          await stream.writeSSE({
-            data: JSON.stringify(chunk),
-          })
-        }
-      }
-
-      await stream.writeSSE({ data: '[DONE]' })
-    }
-    catch (error) {
-      if (error instanceof Error && error.name === 'AbortError')
-        return
-      throw error
-    }
-  })
-}
-
 function isCCNonStreaming(body: Awaited<ReturnType<typeof createChatCompletions>>['body']): body is ChatCompletionResponse {
   return Object.hasOwn(body, 'choices')
-}
-
-function isResponsesNonStreaming(body: Awaited<ReturnType<typeof createResponses>>['body']): body is ResponsesResponse {
-  return Object.hasOwn(body, 'output')
 }

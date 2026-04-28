@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
 
-import { clearProbeCache } from '../src/lib/api-probe'
 import { state } from '../src/lib/state'
 import { server } from '../src/server'
 
@@ -55,12 +54,11 @@ const fetchMock = mock(async (url: string) => {
 
 beforeEach(() => {
   fetchMock.mockClear()
-  clearProbeCache()
   state.lastRequestTimestamp = undefined
 })
 
 describe('compat routing fallback', () => {
-  test('/v1/responses only tries /chat/completions for unknown models', async () => {
+  test('/v1/responses rejects unknown models with 4xx (no auto-translation to chat-completions)', async () => {
     const response = await server.request('/v1/responses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -70,12 +68,10 @@ describe('compat routing fallback', () => {
       }),
     })
 
+    // Unknown models default to chat-completions-only; the proxy refuses to
+    // translate Responses requests into a chat-completions backend.
     expect(response.status).toBe(400)
-
-    const calledUrls = fetchMock.mock.calls.map(call => call[0] as string)
-    expect(calledUrls).toEqual([
-      'https://api.githubcopilot.com/chat/completions',
-    ])
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   test('/v1/responses accepts typed input items when routing directly to responses', async () => {
@@ -101,7 +97,20 @@ describe('compat routing fallback', () => {
     ])
   })
 
-  test('/v1/responses keeps Claude json_object requests on /chat/completions only', async () => {
+  test('/v1/responses Claude json_object requests are translated natively and surface upstream rejection (no chat-completions fallback)', async () => {
+    fetchMock.mockImplementationOnce(async (url: string) => {
+      if (!url.endsWith('/v1/messages')) {
+        throw new Error(`Unexpected upstream URL: ${url}`)
+      }
+      return new Response(JSON.stringify({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'output_config.format json_object: not supported',
+        },
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+    })
+
     const response = await server.request('/v1/responses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -117,10 +126,9 @@ describe('compat routing fallback', () => {
     })
 
     expect(response.status).toBe(400)
-
     const calledUrls = fetchMock.mock.calls.map(call => call[0] as string)
     expect(calledUrls).toEqual([
-      'https://api.githubcopilot.com/chat/completions',
+      'https://api.githubcopilot.com/v1/messages',
     ])
   })
 
@@ -284,48 +292,21 @@ describe('compat routing fallback', () => {
     expect(body.error?.message).toContain('Hosted Responses tools are only supported')
   })
 
-  test('/v1/responses skips /responses after unsupported probe is cached and goes straight to /chat/completions', async () => {
+  test('/v1/responses surfaces unsupported_api_for_model errors verbatim (no chat-completions fallback)', async () => {
     fetchMock.mockImplementation(async (url: string) => {
-      if (url.endsWith('/responses')) {
-        return new Response(JSON.stringify({
-          error: {
-            message: 'unsupported_api_for_model',
-            type: 'invalid_request_error',
-            code: 'unsupported_api_for_model',
-          },
-        }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        })
+      if (!url.endsWith('/responses')) {
+        throw new Error(`Unexpected URL ${url}`)
       }
-
-      if (url.endsWith('/chat/completions')) {
-        return new Response(JSON.stringify({
-          id: 'chatcmpl_fallback',
-          object: 'chat.completion',
-          created: 0,
-          model: 'gpt-5.1',
-          choices: [
-            {
-              index: 0,
-              message: {
-                role: 'assistant',
-                content: 'ok',
-              },
-              logprobs: null,
-              finish_reason: 'stop',
-            },
-          ],
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-
-      throw new Error(`Unexpected URL ${url}`)
+      return new Response(JSON.stringify({
+        error: {
+          message: 'unsupported_api_for_model',
+          type: 'invalid_request_error',
+          code: 'unsupported_api_for_model',
+        },
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } })
     })
 
-    const request = () => server.request('/v1/responses', {
+    const response = await server.request('/v1/responses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -334,16 +315,10 @@ describe('compat routing fallback', () => {
       }),
     })
 
-    const first = await request()
-    expect(first.status).toBe(200)
-    const second = await request()
-    expect(second.status).toBe(200)
-
+    expect(response.status).toBe(400)
     const calledUrls = fetchMock.mock.calls.map(call => call[0] as string)
     expect(calledUrls).toEqual([
       'https://api.githubcopilot.com/responses',
-      'https://api.githubcopilot.com/chat/completions',
-      'https://api.githubcopilot.com/chat/completions',
     ])
   })
 })

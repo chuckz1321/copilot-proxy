@@ -1,16 +1,14 @@
-import type { AnthropicAssistantContentBlock, AnthropicAssistantMessage, AnthropicMessage, AnthropicMessagesPayload, AnthropicResponse, AnthropicTextBlock, AnthropicThinkingBlock, AnthropicTool, AnthropicToolResultBlock, AnthropicToolUseBlock, AnthropicUserContentBlock, AnthropicUserMessage } from './anthropic-types'
+import type { AnthropicAssistantContentBlock, AnthropicAssistantMessage, AnthropicMessage, AnthropicMessagesPayload, AnthropicTextBlock, AnthropicThinkingBlock, AnthropicTool, AnthropicToolResultBlock, AnthropicToolUseBlock, AnthropicUserContentBlock, AnthropicUserMessage } from './anthropic-types'
 
-import type { ChatCompletionResponse, ChatCompletionsPayload, ContentPart, Message, TextPart, Tool, ToolCall } from '~/services/copilot/create-chat-completions'
-import consola from 'consola'
+import type { ChatCompletionsPayload, ContentPart, Message, Tool } from '~/services/copilot/create-chat-completions'
 import { getModelConfig } from '~/lib/model-config'
 import { logIgnoredAnthropicParameter, logLossyAnthropicCompatibility, mapAnthropicCacheControl, throwAnthropicInvalidRequestError } from '~/lib/translation/anthropic-compat'
 import { mapAnthropicOutputFormatToChatCompletions } from '~/lib/translation/anthropic-output-format'
 import { mapAnthropicReasoningToChatCompletions, resolveAnthropicReasoningEffort } from '~/lib/translation/anthropic-reasoning'
-import { mapOpenAIStopReasonToAnthropic } from './utils'
 
 // Payload translation
 
-export interface TranslateOptions {
+interface TranslateOptions {
   anthropicBeta?: string
 }
 
@@ -546,100 +544,4 @@ function logIgnoredMessageBlockCacheControl(
       return
     }
   }
-}
-
-// Response translation
-
-export function translateToAnthropic(
-  response: ChatCompletionResponse,
-  options?: { requestedModel?: string },
-): AnthropicResponse {
-  const allContentBlocks: Array<AnthropicResponse['content'][number]> = []
-  let stopReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | null
-    = null // default
-  stopReason = response.choices[0]?.finish_reason ?? stopReason
-  const hasReplayUnsafeReasoning = response.choices.some(choice =>
-    typeof choice.message.reasoning_text === 'string'
-    && choice.message.reasoning_text.length > 0,
-  )
-
-  if (hasReplayUnsafeReasoning) {
-    logLossyAnthropicCompatibility(
-      'chat completions reasoning replay',
-      'Copilot Chat Completions reasoning cannot be replayed as Anthropic thinking blocks: native /v1/messages requires Anthropic-issued thinking signatures, and Copilot reasoning_opaque is rejected there. The proxy omits translated thinking blocks to keep follow-up turns valid.',
-    )
-  }
-
-  for (const choice of response.choices) {
-    const textBlocks = getAnthropicTextBlocks(choice.message.content)
-    const toolUseBlocks = getAnthropicToolUseBlocks(choice.message.tool_calls)
-
-    allContentBlocks.push(...textBlocks, ...toolUseBlocks)
-
-    // Use the finish_reason from the first choice, or prioritize tool_calls
-    if (choice.finish_reason === 'tool_calls' || stopReason === 'stop') {
-      stopReason = choice.finish_reason
-    }
-  }
-
-  return {
-    id: response.id,
-    type: 'message',
-    role: 'assistant',
-    model: options?.requestedModel ?? response.model,
-    content: allContentBlocks,
-    stop_reason: mapOpenAIStopReasonToAnthropic(stopReason),
-    stop_sequence: null,
-    usage: {
-      input_tokens:
-        (response.usage?.prompt_tokens ?? 0)
-        - (response.usage?.prompt_tokens_details?.cached_tokens ?? 0),
-      output_tokens: response.usage?.completion_tokens ?? 0,
-      ...(response.usage?.prompt_tokens_details?.cached_tokens
-        !== undefined && {
-        cache_read_input_tokens:
-          response.usage.prompt_tokens_details.cached_tokens,
-      }),
-    },
-  }
-}
-
-function getAnthropicTextBlocks(
-  messageContent: Message['content'],
-): Array<AnthropicTextBlock> {
-  if (typeof messageContent === 'string') {
-    return [{ type: 'text', text: messageContent }]
-  }
-
-  if (Array.isArray(messageContent)) {
-    return messageContent
-      .filter((part): part is TextPart => part.type === 'text')
-      .map(part => ({ type: 'text', text: part.text }))
-  }
-
-  return []
-}
-
-function getAnthropicToolUseBlocks(
-  toolCalls: Array<ToolCall> | undefined,
-): Array<AnthropicToolUseBlock> {
-  if (!toolCalls) {
-    return []
-  }
-  return toolCalls.map((toolCall) => {
-    let parsedInput: Record<string, unknown>
-    try {
-      parsedInput = JSON.parse(toolCall.function.arguments) as Record<string, unknown>
-    }
-    catch {
-      consola.warn('Failed to parse tool call arguments:', toolCall.function.arguments)
-      parsedInput = {}
-    }
-    return {
-      type: 'tool_use' as const,
-      id: toolCall.id,
-      name: toolCall.function.name,
-      input: parsedInput,
-    }
-  })
 }

@@ -1,16 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
-import { clearProbeCache } from '~/lib/api-probe'
 import { state } from '~/lib/state'
 import { server } from '~/server'
 
 const originalFetch = globalThis.fetch
-
-function createAbortError(): Error {
-  const error = new Error('The operation was aborted.')
-  error.name = 'AbortError'
-  return error
-}
 
 const fetchMock = mock(async (url: string, _init?: RequestInit): Promise<Response> => {
   throw new Error(`Unexpected upstream URL: ${url}`)
@@ -21,7 +14,6 @@ beforeEach(() => {
   fetchMock.mockImplementation(async (url: string, _init?: RequestInit): Promise<Response> => {
     throw new Error(`Unexpected upstream URL: ${url}`)
   })
-  clearProbeCache()
   state.lastRequestTimestamp = undefined
   state.copilotToken = 'test-token'
   state.vsCodeVersion = '1.0.0'
@@ -31,7 +23,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  clearProbeCache()
   globalThis.fetch = originalFetch
 })
 
@@ -144,63 +135,6 @@ describe('chat-completions error paths', () => {
     }
   })
 
-  test('responses-routed aborts return an empty response instead of surfacing as 500', async () => {
-    fetchMock.mockImplementation(async (url: string, _init?: RequestInit): Promise<Response> => {
-      if (url.endsWith('/responses')) {
-        throw createAbortError()
-      }
-
-      throw new Error(`Unexpected upstream URL: ${url}`)
-    })
-
-    const res = await server.request('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-5.4',
-        messages: [{ role: 'user', content: 'hi' }],
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    expect(await res.text()).toBe('')
-  })
-
-  test('responses fallback aborts return an empty response instead of surfacing as 500', async () => {
-    fetchMock.mockImplementation(async (url: string, _init?: RequestInit): Promise<Response> => {
-      if (url.endsWith('/chat/completions')) {
-        return new Response(JSON.stringify({
-          error: {
-            message: 'unsupported_api_for_model',
-            code: 'unsupported_api_for_model',
-          },
-        }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-
-      if (url.endsWith('/responses')) {
-        throw createAbortError()
-      }
-
-      throw new Error(`Unexpected upstream URL: ${url}`)
-    })
-
-    const res = await server.request('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-5',
-        messages: [{ role: 'user', content: 'hi' }],
-      }),
-    })
-
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(res.status).toBe(200)
-    expect(await res.text()).toBe('')
-  })
-
   test('Claude chat-completions requests keep using /chat/completions despite native Anthropic support', async () => {
     fetchMock.mockImplementation(async (url: string, _init?: RequestInit): Promise<Response> => {
       if (url.endsWith('/chat/completions')) {
@@ -243,53 +177,8 @@ describe('chat-completions error paths', () => {
     ])
   })
 
-  test('responses-routed chat-completions map response_format json_schema to Responses text.format', async () => {
-    fetchMock.mockImplementation(async (url: string, init?: RequestInit): Promise<Response> => {
-      if (url.endsWith('/responses')) {
-        const forwardedPayload = JSON.parse(String(init?.body)) as {
-          text?: {
-            format?: {
-              type?: string
-              name?: string
-              strict?: boolean
-              schema?: Record<string, unknown>
-            }
-          }
-        }
-
-        expect(forwardedPayload.text).toEqual({
-          format: {
-            type: 'json_schema',
-            name: 'math_answer',
-            strict: true,
-            schema: {
-              type: 'object',
-              properties: { answer: { type: 'string' } },
-              required: ['answer'],
-              additionalProperties: false,
-            },
-          },
-        })
-
-        return new Response(JSON.stringify({
-          id: 'resp_json_schema',
-          object: 'response',
-          model: 'gpt-5.4',
-          output: [
-            {
-              type: 'message',
-              role: 'assistant',
-              status: 'completed',
-              content: [{ type: 'output_text', text: '{"answer":"4"}' }],
-            },
-          ],
-          status: 'completed',
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-
+  test('chat-completions client cannot reach a responses-only model and gets a clean 4xx', async () => {
+    fetchMock.mockImplementation(async (url: string): Promise<Response> => {
       throw new Error(`Unexpected upstream URL: ${url}`)
     })
 
@@ -298,28 +187,13 @@ describe('chat-completions error paths', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'gpt-5.4',
-        messages: [{ role: 'user', content: 'What is 2+2? Return JSON.' }],
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'math_answer',
-            strict: true,
-            schema: {
-              type: 'object',
-              properties: { answer: { type: 'string' } },
-              required: ['answer'],
-              additionalProperties: false,
-            },
-          },
-        },
+        messages: [{ role: 'user', content: 'hi' }],
       }),
     })
 
-    expect(res.status).toBe(200)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const json = await res.json() as {
-      choices: Array<{ message: { content: string } }>
-    }
-    expect(JSON.parse(json.choices[0].message.content)).toEqual({ answer: '4' })
+    expect(res.status).toBe(400)
+    expect(fetchMock).not.toHaveBeenCalled()
+    const body = await res.json() as { error?: { message?: string } }
+    expect(body.error?.message).toContain('cannot be reached via /chat/completions')
   })
 })

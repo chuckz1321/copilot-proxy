@@ -81,10 +81,11 @@ test('/v1/responses official subroutes are forwarded to the Copilot backend', as
   ] as const
 
   for (const item of cases) {
+    const hasBody = 'body' in item
     const response = await server.request(item.localPath, {
       method: item.method,
-      headers: item.body ? { 'Content-Type': 'application/json' } : undefined,
-      body: item.body ? JSON.stringify(item.body) : undefined,
+      headers: hasBody ? { 'Content-Type': 'application/json' } : undefined,
+      body: hasBody ? JSON.stringify(item.body) : undefined,
     })
 
     expect(response.status).toBe(200)

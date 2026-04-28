@@ -1,243 +1,119 @@
 import type { BackendApiType } from './model-config'
 
-import type { AnthropicMessagesPayload, AnthropicUserContentBlock } from '~/lib/translation/types'
+import type { AnthropicMessagesPayload } from '~/lib/translation/types'
 import type { ResponsesPayload } from '~/services/copilot/create-responses'
 import { formatBackendApi } from './backend-api'
-import { getModelConfig, resolveBackendForConfig } from './model-config'
+import { getModelConfig } from './model-config'
 
-export interface BackendRouteStep {
-  api: BackendApiType
-  context?: string
+/**
+ * Where the request will actually go upstream and whether the proxy translates it.
+ *
+ * - `direct`: client protocol equals backend protocol — forward with minimal sanitization
+ * - `translate`: client protocol differs from backend protocol — apply the translation
+ *   path matching (clientApi, backend). Only allowed inside the
+ *   `{anthropic-messages, responses}` family.
+ */
+interface BackendRoute {
+  backend: BackendApiType
+  kind: 'direct' | 'translate'
 }
 
-export interface BackendRoutePolicy {
-  resolvedBackend: BackendApiType
-  steps: Array<BackendRouteStep>
-  localError?: string
-  exhaustedError?: string
-}
+type ClientApi = BackendApiType
 
-interface BackendRoutingContext {
-  resolvedBackend: BackendApiType
-  supportedApis: ReadonlySet<BackendApiType>
-}
+const RESPONSES_INPUT_FILE_REJECTION_MESSAGE
+  = 'input_file is only supported when routing this model directly through /responses. Use a model that supports /responses directly, or provide content that can be represented as translated text/image blocks.'
+const RESPONSES_HOSTED_TOOL_REJECTION_MESSAGE
+  = 'Hosted Responses tools are only supported when routing this model directly through /responses. Use a Responses-backed model or replace hosted tools with function tools.'
 
-const RESPONSES_JSON_OBJECT_BYPASS_REASON = 'json_object structured output'
-const RESPONSES_JSON_SCHEMA_NATIVE_ONLY_REASON = 'json_schema structured output requires native Anthropic /v1/messages passthrough'
-const RESPONSES_INPUT_FILE_REJECTION_MESSAGE = 'input_file is only supported when routing this model directly through /responses. Use a model that supports /responses directly, or provide content that can be represented as translated text/image blocks.'
-const RESPONSES_HOSTED_TOOL_REJECTION_MESSAGE = 'Hosted Responses tools are only supported when routing this model directly through /responses. Use a Responses-backed model or replace hosted tools with function tools.'
-const MESSAGES_JSON_OBJECT_BYPASS_REASON = 'json_object requires an OpenAI-compatible backend'
-const MESSAGES_JSON_SCHEMA_NATIVE_ONLY_REASON = 'json_schema structured output requires native Anthropic /v1/messages passthrough'
-const MESSAGES_URL_DOCUMENT_BYPASS_REASON = 'document.source.type="url" is expanded locally because Copilot native /v1/messages rejects URL-backed documents'
-
-export function planChatCompletionsBackends(model: string): BackendRoutePolicy {
-  const routing = createRoutingContext(model, 'chat-completions')
-  const steps = supportedSteps(
-    routing.supportedApis,
-    routing.resolvedBackend === 'responses'
-      ? [{ api: 'responses' }, { api: 'chat-completions' }]
-      : [{ api: 'chat-completions' }, { api: 'responses' }],
-  )
-
-  return {
-    resolvedBackend: routing.resolvedBackend,
-    steps,
-  }
-}
-
-export function planMessagesBackends(
+/**
+ * Resolve the upstream backend for a (clientApi, model) pair.
+ *
+ * This is a pure routing decision — no payload inspection, no runtime probe,
+ * no fallback chain. Payload-level compatibility checks for the Responses
+ * translation path live in `assertResponsesPayloadTranslatable`, called by
+ * the Responses handler after a `translate` route is resolved.
+ *
+ * Throws via the supplied `onLocalError` when the model lists no supported
+ * backend compatible with the client protocol.
+ *
+ * Routing rules:
+ *  1. If clientApi ∈ model.supportedApis  → `direct`.
+ *  2. Else if clientApi ∈ {anthropic-messages, responses}
+ *       and the other one ∈ model.supportedApis → `translate`.
+ *  3. Else → 4xx via `onLocalError`.
+ *
+ * The proxy does NOT translate to or from `chat-completions`. Clients of the
+ * Anthropic or Responses APIs cannot reach a chat-completions-only model, and
+ * vice versa.
+ */
+export function resolveRoute(
+  clientApi: ClientApi,
   model: string,
-  payload: AnthropicMessagesPayload,
-): BackendRoutePolicy {
-  const routing = createRoutingContext(model, 'anthropic-messages')
-  const nativeAnthropicBypassReason = getMessagesNativeAnthropicBypassReason(payload)
-  const nativeAnthropicOnlyReason = getMessagesNativeAnthropicOnlyReason(payload)
+  onLocalError: (message: string) => never,
+): BackendRoute {
+  const supportedApis = new Set(getModelConfig(model).supportedApis)
 
-  if (routing.resolvedBackend === 'anthropic-messages') {
-    let steps: Array<BackendRouteStep>
-    if (nativeAnthropicBypassReason) {
-      steps = supportedSteps(routing.supportedApis, [
-        { api: 'chat-completions', context: nativeAnthropicBypassReason },
-        { api: 'responses', context: nativeAnthropicBypassReason },
-      ])
-    }
-    else if (nativeAnthropicOnlyReason) {
-      steps = supportedSteps(routing.supportedApis, [
-        { api: 'anthropic-messages', context: nativeAnthropicOnlyReason },
-      ])
-    }
-    else {
-      steps = supportedSteps(routing.supportedApis, [
-        { api: 'anthropic-messages' },
-        { api: 'chat-completions' },
-        { api: 'responses' },
-      ])
-    }
-
-    return {
-      resolvedBackend: routing.resolvedBackend,
-      localError: nativeAnthropicBypassReason && steps.length === 0
-        ? buildNoCompatibleBackendError(model, nativeAnthropicBypassReason)
-        : undefined,
-      steps,
-    }
+  if (supportedApis.has(clientApi)) {
+    return { backend: clientApi, kind: 'direct' }
   }
 
-  if (routing.resolvedBackend === 'responses') {
-    return {
-      resolvedBackend: routing.resolvedBackend,
-      steps: supportedSteps(routing.supportedApis, [{ api: 'responses' }, { api: 'chat-completions' }]),
-    }
+  const peer = peerInTranslatableFamily(clientApi)
+  if (peer && supportedApis.has(peer)) {
+    return { backend: peer, kind: 'translate' }
   }
 
-  return {
-    resolvedBackend: routing.resolvedBackend,
-    steps: supportedSteps(routing.supportedApis, [{ api: 'chat-completions' }, { api: 'responses' }]),
-  }
+  onLocalError(buildUnsupportedClientApiError(clientApi, model, supportedApis))
 }
 
-export function planResponsesBackends(
-  model: string,
+/**
+ * Reject Responses payloads carrying features that cannot survive translation
+ * to /v1/messages (hosted tools, input_file). Intended for callers that have
+ * resolved a `translate` route and need to validate the payload.
+ */
+export function assertResponsesPayloadTranslatable(
   payload: ResponsesPayload,
-): BackendRoutePolicy {
-  const routing = createRoutingContext(model, 'responses')
-  const anthropicBypassReason = getResponsesAnthropicBypassReason(payload)
-  const anthropicOnlyReason = getResponsesAnthropicOnlyReason(payload)
-  const localError = routing.resolvedBackend === 'responses'
-    ? undefined
-    : getResponsesTranslationRejectionReason(payload)
-
-  if (routing.resolvedBackend === 'chat-completions') {
-    return {
-      resolvedBackend: routing.resolvedBackend,
-      steps: supportedSteps(routing.supportedApis, [{ api: 'chat-completions' }, { api: 'responses' }]),
-    }
-  }
-
-  if (routing.resolvedBackend === 'anthropic-messages') {
-    let steps: Array<BackendRouteStep>
-    if (anthropicBypassReason) {
-      steps = supportedSteps(routing.supportedApis, [
-        { api: 'chat-completions', context: anthropicBypassReason },
-        { api: 'responses', context: anthropicBypassReason },
-      ])
-    }
-    else if (anthropicOnlyReason) {
-      steps = supportedSteps(routing.supportedApis, [
-        { api: 'anthropic-messages', context: anthropicOnlyReason },
-      ])
-    }
-    else {
-      steps = supportedSteps(routing.supportedApis, [
-        { api: 'anthropic-messages' },
-        { api: 'chat-completions' },
-        { api: 'responses' },
-      ])
-    }
-
-    return {
-      resolvedBackend: routing.resolvedBackend,
-      localError,
-      exhaustedError: anthropicBypassReason
-        ? buildExhaustedUnsupportedError(model, steps, anthropicBypassReason)
-        : undefined,
-      steps,
-    }
-  }
-
-  return {
-    resolvedBackend: routing.resolvedBackend,
-    steps: supportedSteps(routing.supportedApis, [{ api: 'responses' }, { api: 'chat-completions' }]),
-  }
-}
-
-function createRoutingContext(
-  model: string,
-  requestedApi: BackendApiType,
-): BackendRoutingContext {
-  const config = getModelConfig(model)
-  return {
-    resolvedBackend: resolveBackendForConfig(config, requestedApi),
-    supportedApis: new Set(config.supportedApis),
-  }
-}
-
-function supportedSteps(
-  supportedApis: ReadonlySet<BackendApiType>,
-  steps: Array<BackendRouteStep>,
-): Array<BackendRouteStep> {
-  const seen = new Set<BackendApiType>()
-  const filtered: Array<BackendRouteStep> = []
-
-  for (const step of steps) {
-    if (!supportedApis.has(step.api) || seen.has(step.api)) {
-      continue
-    }
-    seen.add(step.api)
-    filtered.push(step)
-  }
-
-  return filtered
-}
-
-function buildExhaustedUnsupportedError(
-  model: string,
-  steps: Array<BackendRouteStep>,
-  context: string,
-): string {
-  if (steps.length === 0) {
-    return buildNoCompatibleBackendError(model, context)
-  }
-
-  return `Model ${model} does not support ${joinWithOr(steps.map(step => formatBackendApi(step.api)))}${formatContext(context)}.`
-}
-
-function buildNoCompatibleBackendError(model: string, context: string): string {
-  return `Model ${model} does not support any backend compatible with ${context}.`
-}
-
-function joinWithOr(values: string[]): string {
-  if (values.length <= 1) {
-    return values[0] ?? ''
-  }
-
-  if (values.length === 2) {
-    return `${values[0]} or ${values[1]}`
-  }
-
-  return `${values.slice(0, -1).join(', ')}, or ${values.at(-1)}`
-}
-
-function formatContext(context: string | undefined): string {
-  return context ? ` (${context})` : ''
-}
-
-function getResponsesAnthropicBypassReason(payload: ResponsesPayload): string | undefined {
-  if (payload.text?.format?.type === 'json_object') {
-    return RESPONSES_JSON_OBJECT_BYPASS_REASON
-  }
-
-  return undefined
-}
-
-function getResponsesAnthropicOnlyReason(payload: ResponsesPayload): string | undefined {
-  if (payload.text?.format?.type === 'json_schema') {
-    return RESPONSES_JSON_SCHEMA_NATIVE_ONLY_REASON
-  }
-
-  return undefined
-}
-
-function getResponsesTranslationRejectionReason(payload: ResponsesPayload): string | undefined {
+  onLocalError: (message: string) => never,
+): void {
   if (payloadHasHostedTools(payload)) {
-    return RESPONSES_HOSTED_TOOL_REJECTION_MESSAGE
+    onLocalError(RESPONSES_HOSTED_TOOL_REJECTION_MESSAGE)
   }
-
   if (payloadHasInputFileParts(payload)) {
-    return RESPONSES_INPUT_FILE_REJECTION_MESSAGE
+    onLocalError(RESPONSES_INPUT_FILE_REJECTION_MESSAGE)
   }
+}
 
+/**
+ * Anthropic Messages payloads carry no upstream-only features that need to be
+ * rejected before translation. The native passthrough handler already
+ * sanitizes its own request before forwarding to /v1/messages.
+ *
+ * Kept as a no-op so the call site shape mirrors `assertResponsesPayloadTranslatable`.
+ */
+export function assertMessagesPayloadTranslatable(
+  _payload: AnthropicMessagesPayload,
+  _onLocalError: (message: string) => never,
+): void {
+  // intentionally empty
+}
+
+function peerInTranslatableFamily(clientApi: ClientApi): BackendApiType | undefined {
+  if (clientApi === 'anthropic-messages')
+    return 'responses'
+  if (clientApi === 'responses')
+    return 'anthropic-messages'
   return undefined
+}
+
+function buildUnsupportedClientApiError(
+  clientApi: ClientApi,
+  model: string,
+  supportedApis: ReadonlySet<BackendApiType>,
+): string {
+  const supportedList = [...supportedApis].map(formatBackendApi).join(', ')
+  if (supportedApis.size === 0) {
+    return `Model ${model} has no supported backend API.`
+  }
+  return `Model ${model} cannot be reached via ${formatBackendApi(clientApi)}. Supported backend(s): ${supportedList}. The proxy does not translate between /chat/completions and other endpoints.`
 }
 
 function payloadHasHostedTools(payload: ResponsesPayload): boolean {
@@ -262,73 +138,6 @@ function payloadHasInputFileParts(payload: ResponsesPayload): boolean {
       if (part.type === 'input_file') {
         return true
       }
-    }
-  }
-
-  return false
-}
-
-function getMessagesNativeAnthropicBypassReason(
-  payload: AnthropicMessagesPayload,
-): string | undefined {
-  const outputFormatType = getMessagesOutputFormatType(payload)
-  if (outputFormatType === 'json_object') {
-    return MESSAGES_JSON_OBJECT_BYPASS_REASON
-  }
-
-  if (payloadHasUrlDocumentSources(payload)) {
-    return MESSAGES_URL_DOCUMENT_BYPASS_REASON
-  }
-
-  return undefined
-}
-
-function getMessagesNativeAnthropicOnlyReason(
-  payload: AnthropicMessagesPayload,
-): string | undefined {
-  const outputFormatType = getMessagesOutputFormatType(payload)
-  if (outputFormatType === 'json_schema') {
-    return MESSAGES_JSON_SCHEMA_NATIVE_ONLY_REASON
-  }
-
-  return undefined
-}
-
-function getMessagesOutputFormatType(
-  payload: AnthropicMessagesPayload,
-): string | undefined {
-  const format = payload.output_config?.format
-  return format && typeof format.type === 'string' ? format.type : undefined
-}
-
-function payloadHasUrlDocumentSources(payload: AnthropicMessagesPayload): boolean {
-  for (const message of payload.messages) {
-    if (message.role !== 'user' || !Array.isArray(message.content)) {
-      continue
-    }
-
-    if (contentBlocksHaveUrlDocumentSource(message.content)) {
-      return true
-    }
-  }
-
-  return false
-}
-
-function contentBlocksHaveUrlDocumentSource(
-  blocks: ReadonlyArray<AnthropicUserContentBlock>,
-): boolean {
-  for (const block of blocks) {
-    if (block.type === 'document' && block.source.type === 'url') {
-      return true
-    }
-
-    if (
-      block.type === 'tool_result'
-      && Array.isArray(block.content)
-      && contentBlocksHaveUrlDocumentSource(block.content)
-    ) {
-      return true
     }
   }
 
