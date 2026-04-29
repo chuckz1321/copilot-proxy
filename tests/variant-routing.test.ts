@@ -1,4 +1,4 @@
-import type { AnthropicMessagesPayload } from '~/routes/messages/anthropic-types'
+import type { AnthropicMessagesPayload } from '~/lib/translation/types'
 import type { Model } from '~/services/copilot/get-models'
 
 import { describe, expect, test } from 'bun:test'

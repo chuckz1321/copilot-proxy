@@ -1,5 +1,5 @@
 import type { SSEStreamingApi } from 'hono/streaming'
-import type { AnthropicStreamEventData } from './anthropic-types'
+import type { AnthropicStreamEventData } from '~/lib/translation/types'
 
 export const DEFAULT_ANTHROPIC_KEEPALIVE_INTERVAL_MS = 5000
 

@@ -1,4 +1,4 @@
-import type { AnthropicResponse, AnthropicStreamEventData, AnthropicStreamState } from './anthropic-types'
+import type { AnthropicResponse, AnthropicStreamEventData, AnthropicStreamState } from '~/lib/translation/types'
 
 function isToolBlockOpen(state: AnthropicStreamState): boolean {
   return state.contentBlockOpen && state.currentBlockType === 'tool_use'

@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 
-import type { AnthropicMessagesPayload } from './anthropic-types'
+import type { AnthropicMessagesPayload } from '~/lib/translation/types'
 
 import { AnthropicMessagesPayloadSchema } from '~/lib/schemas'
 import { assertCopilotCompatibleAnthropicRequest } from '~/lib/translation/anthropic-compat'

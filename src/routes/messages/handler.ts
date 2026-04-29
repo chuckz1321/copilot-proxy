@@ -1,6 +1,6 @@
 import type { Context } from 'hono'
 
-import type { AnthropicMessagesPayload, AnthropicResponse, AnthropicStreamEventData } from './anthropic-types'
+import type { AnthropicMessagesPayload, AnthropicResponse, AnthropicStreamEventData } from '~/lib/translation/types'
 
 import consola from 'consola'
 import { streamSSE } from 'hono/streaming'

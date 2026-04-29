@@ -1,4 +1,4 @@
-import type { AnthropicMessagesPayload } from './anthropic-types'
+import type { AnthropicMessagesPayload } from '~/lib/translation/types'
 
 interface ModelVariants {
   fast?: string

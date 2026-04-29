@@ -1,4 +1,4 @@
-import type { AnthropicStreamState } from '~/routes/messages/anthropic-types'
+import type { AnthropicStreamState } from '~/lib/translation/types'
 
 import { describe, expect, test } from 'bun:test'
 
