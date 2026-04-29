@@ -1,11 +1,16 @@
 import type { AnthropicStreamState } from '~/lib/translation/types'
+import type { NativeAnthropicPassthroughState } from '~/routes/messages/stream-finalizer'
 
 import { describe, expect, test } from 'bun:test'
 
 import {
   canRecoverUpstreamTerminationAsMessage,
+  createNativeAnthropicPassthroughState,
   finalizeAnthropicStreamFromState,
-} from '~/routes/messages/stream-translation'
+  finalizeNativeAnthropicPassthroughState,
+  shouldEmitNativeAnthropicTerminationError,
+  updateNativeAnthropicPassthroughState,
+} from '~/routes/messages/stream-finalizer'
 
 function makeState(overrides: Partial<AnthropicStreamState> = {}): AnthropicStreamState {
   return {
@@ -21,6 +26,43 @@ function makeState(overrides: Partial<AnthropicStreamState> = {}): AnthropicStre
     toolCalls: {},
     ...overrides,
   }
+}
+
+function recordNativeMessageStart(
+  state: NativeAnthropicPassthroughState,
+  outputTokens = 0,
+): void {
+  updateNativeAnthropicPassthroughState(state, {
+    type: 'message_start',
+    message: {
+      id: 'msg_partial',
+      type: 'message',
+      role: 'assistant',
+      content: [],
+      model: 'fake-model',
+      stop_reason: null,
+      stop_sequence: null,
+      usage: {
+        input_tokens: 5,
+        output_tokens: outputTokens,
+      },
+    },
+  })
+}
+
+function recordNativeTextDelta(
+  state: NativeAnthropicPassthroughState,
+): void {
+  updateNativeAnthropicPassthroughState(state, {
+    type: 'content_block_start',
+    index: 0,
+    content_block: { type: 'text', text: '' },
+  })
+  updateNativeAnthropicPassthroughState(state, {
+    type: 'content_block_delta',
+    index: 0,
+    delta: { type: 'text_delta', text: 'partial' },
+  })
 }
 
 describe('canRecoverUpstreamTerminationAsMessage', () => {
@@ -40,6 +82,83 @@ describe('canRecoverUpstreamTerminationAsMessage', () => {
     })
 
     expect(canRecoverUpstreamTerminationAsMessage(state)).toBe(true)
+  })
+})
+
+describe('finalizeNativeAnthropicPassthroughState', () => {
+  test('synthesizes a complete Anthropic ending after visible text', () => {
+    const state = createNativeAnthropicPassthroughState()
+    recordNativeMessageStart(state, 2)
+    recordNativeTextDelta(state)
+
+    const events = finalizeNativeAnthropicPassthroughState(state)
+
+    expect(events).toEqual([
+      { type: 'content_block_stop', index: 0 },
+      {
+        type: 'message_delta',
+        delta: { stop_reason: 'end_turn', stop_sequence: null },
+        usage: { output_tokens: 2 },
+      },
+      { type: 'message_stop' },
+    ])
+    expect(state.messageStopSeen).toBe(true)
+    expect(state.currentBlockIndex).toBeNull()
+  })
+
+  test('does not duplicate an upstream message_delta', () => {
+    const state = createNativeAnthropicPassthroughState()
+    recordNativeMessageStart(state)
+    recordNativeTextDelta(state)
+    updateNativeAnthropicPassthroughState(state, {
+      type: 'content_block_stop',
+      index: 0,
+    })
+    updateNativeAnthropicPassthroughState(state, {
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn', stop_sequence: null },
+      usage: { output_tokens: 4 },
+    })
+
+    expect(finalizeNativeAnthropicPassthroughState(state)).toEqual([
+      { type: 'message_stop' },
+    ])
+  })
+
+  test('refuses to recover thinking-only output as a successful message', () => {
+    const state = createNativeAnthropicPassthroughState()
+    recordNativeMessageStart(state)
+    updateNativeAnthropicPassthroughState(state, {
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'thinking', thinking: '' },
+    })
+    updateNativeAnthropicPassthroughState(state, {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'thinking_delta', thinking: 'reasoning' },
+    })
+
+    expect(finalizeNativeAnthropicPassthroughState(state)).toEqual([])
+    expect(shouldEmitNativeAnthropicTerminationError(state)).toBe(true)
+  })
+
+  test('refuses to complete an open tool_use block', () => {
+    const state = createNativeAnthropicPassthroughState()
+    recordNativeMessageStart(state)
+    updateNativeAnthropicPassthroughState(state, {
+      type: 'content_block_start',
+      index: 0,
+      content_block: {
+        type: 'tool_use',
+        id: 'toolu_1',
+        name: 'lookup',
+        input: {},
+      },
+    })
+
+    expect(finalizeNativeAnthropicPassthroughState(state)).toEqual([])
+    expect(state.messageStopSeen).toBe(false)
   })
 })
 
