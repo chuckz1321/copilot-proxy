@@ -49,6 +49,7 @@ interface LiveEnvConfig extends LiveCopilotProbeConfig {
 }
 
 const LIVE_TEST_ENABLED = process.env.COPILOT_LIVE_TEST === '1'
+const LIVE_RESPONSES_ONLY = process.env.COPILOT_LIVE_RESPONSES_ONLY === '1'
 const LIVE_TEST_TIMEOUT_MS = parseTimeout(process.env.COPILOT_LIVE_TIMEOUT_MS)
 const LIVE_TEST_RETRY_COUNT = parseRetryCount(process.env.COPILOT_LIVE_RETRY_COUNT)
 const runLiveTest = LIVE_TEST_ENABLED ? test : test.skip
@@ -57,11 +58,12 @@ runLiveTest(
   'runs the GitHub Copilot upstream capability probe matrix',
   async () => {
     const config = getLiveEnvConfig()
+    const probes = getEnabledLiveProbes(config)
     const outcomes: Array<ProbeOutcome> = []
     const failures: Array<string> = []
 
     try {
-      for (const probe of copilotCapabilityProbes) {
+      for (const probe of probes) {
         const outcome = await runProbeWithRetries(probe, config)
         outcomes.push(outcome)
 
@@ -87,6 +89,27 @@ function parseTimeout(rawTimeout: string | undefined): number {
 function parseRetryCount(rawRetryCount: string | undefined): number {
   const parsed = Number.parseInt(rawRetryCount ?? '', 10)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2
+}
+
+function getEnabledLiveProbes(config: LiveEnvConfig): Array<CapabilityProbe> {
+  if (!LIVE_RESPONSES_ONLY) {
+    return copilotCapabilityProbes
+  }
+
+  return copilotCapabilityProbes.filter((probe) => {
+    if (probe.endpoint === 'responses') {
+      return probe.buildPayload(config).model === config.responsesModel
+    }
+
+    if (probe.endpoint === 'responses-raw') {
+      const request = probe.buildRequest(config)
+      return request.model === undefined
+        || request.model === config.responsesModel
+        || request.model === 'N/A'
+    }
+
+    return false
+  })
 }
 
 async function runProbeWithRetries(

@@ -37,24 +37,29 @@ These should only be enabled after a live probe proves Copilot accepts the trans
 - Mapping Anthropic `output_config.effort` or thinking hints onto Copilot `reasoning.effort`
 - Mapping `disable_parallel_tool_use = true` onto `parallel_tool_calls = false`
 - Passing URL image inputs through to Copilot `/responses`
-- Passing Responses-native controls such as `text.verbosity`, `include`, `prompt_cache_key`, `truncation`, `context_management`, `store`, `previous_response_id`, `background`, `max_tool_calls`, and `service_tier`
-- Passing hosted Responses tools such as `web_search`, `tool_search`, and `code_interpreter`
+- Passing Responses-native controls such as `text.verbosity`, `include`, `top_logprobs`, `prompt_cache_key`, `prompt_cache_retention`, `metadata`, `safety_identifier`, `user`, `truncation`, `context_management`, `conversation`, `prompt`, `store`, `previous_response_id`, `background`, `max_tool_calls`, `stream_options`, and `service_tier`
+- Passing hosted and Responses-native tools such as `web_search`, `web_search_preview`, `file_search`, `image_generation`, `mcp`, `computer_use_preview`, `tool_search`, `local_shell`, `shell`, `custom`, `namespace`, `apply_patch`, and `code_interpreter`
 - Exposing official Responses subroutes such as `/responses/{id}`, `/responses/{id}/cancel`, `/responses/{id}/input_items`, `/responses/input_tokens`, and `/responses/compact`
 
 ## Probe matrix
 
 The executable probe definitions live in [tests/live/copilot-capability-matrix.ts](../tests/live/copilot-capability-matrix.ts).
 
+The Responses rows are aligned to the OpenAI OpenAPI `CreateResponse` schema and official Responses subroutes as of API spec `2.3.0`. The matrix intentionally emphasizes upstream-gated pass-through decisions: state/context controls, include values, streaming options, tool definitions, tool-choice forms, multimodal input shapes, structured output, and official `/responses/*` routes. Plain sampling controls such as `temperature`, `top_p`, and `max_output_tokens` are covered by normal request smoke coverage unless a Copilot-specific incompatibility appears.
+
+Hosted tool presence probes set `tool_choice=none`, so they measure whether Copilot accepts the tool schema on the request, not whether the backend can or will execute that hosted tool.
+
 | Probe group | Probe IDs | Copilot endpoint | Default model | Expected interpretation |
 | --- | --- | --- | --- | --- |
 | Baselines | `baseline-claude-chat-completions`, `baseline-claude-responses-unsupported`, `baseline-responses-api`, `baseline-responses-model-chat-completions-unsupported`, `responses-streaming` | `/chat/completions`, `/responses` | `claude-opus-4.6`, `gpt-5.5` | Baseline positive probes must succeed; negative baseline probes must return clean `unsupported` |
 | Claude compatibility gates | `claude-tool-choice-required`, `claude-parallel-tool-calls-false`, `claude-reasoning-effort-high`, `claude-reasoning-effort-max`, `claude-response-format-json-object`, `claude-response-format-json-schema` | `/chat/completions` | `claude-opus-4.6` | `supported` or clean `unsupported` |
-| Responses reasoning and output controls | `responses-reasoning-effort-none`, `responses-reasoning-effort-low`, `responses-reasoning-effort-medium`, `responses-reasoning-effort-high`, `responses-reasoning-effort-xhigh`, `responses-reasoning-effort-minimal-unsupported`, `responses-reasoning-summary-auto`, `responses-include-encrypted-reasoning`, `responses-text-verbosity-low`, `responses-text-verbosity-medium`, `responses-text-verbosity-high` | `/responses` | `gpt-5.5` | Supported values may pass; known invalid values must return clean `unsupported` |
-| Responses cache and context controls | `responses-prompt-cache-key`, `responses-truncation-auto`, `responses-context-management`, `responses-store-false`, `responses-store-true-unsupported`, `responses-previous-response-id-unsupported`, `responses-background-unsupported`, `responses-background-stream-unsupported`, `responses-service-tier-auto-unsupported` | `/responses` | `gpt-5.5` | Supported stateless controls may pass; stateful/background controls currently must return clean `unsupported` |
-| Responses tools and structured output | `responses-max-tool-calls-1`, `responses-parallel-tool-calls-false`, `responses-web-search-tool`, `responses-tool-search-tool`, `responses-code-interpreter-tool-unsupported`, `responses-text-format-json-object`, `responses-text-format-json-schema` | `/responses` | `gpt-5.5` | Function/tool controls and accepted hosted tools may pass; unsupported hosted tools must return clean `unsupported` |
-| Responses multimodal and files | `responses-input-image-url`, `responses-input-file-url` | `/responses` | `gpt-5.5` | `supported` or clean `unsupported` |
+| Responses streaming controls | `responses-stream-options-include-obfuscation-false` | `/responses` | `gpt-5.5` | `supported` or clean `unsupported` |
+| Responses reasoning and output controls | `responses-reasoning-effort-none`, `responses-reasoning-effort-low`, `responses-reasoning-effort-medium`, `responses-reasoning-effort-high`, `responses-reasoning-effort-xhigh`, `responses-reasoning-effort-minimal-unsupported`, `responses-reasoning-summary-auto`, `responses-reasoning-summary-concise`, `responses-reasoning-summary-detailed`, `responses-reasoning-generate-summary-auto-deprecated`, `responses-include-encrypted-reasoning`, `responses-include-output-logprobs`, `responses-include-input-image-url`, `responses-text-verbosity-low`, `responses-text-verbosity-medium`, `responses-text-verbosity-high` | `/responses` | `gpt-5.5` | Supported values including `xhigh` must pass; known invalid values must return clean `unsupported` |
+| Responses cache and context controls | `responses-prompt-cache-key`, `responses-prompt-cache-retention-in-memory`, `responses-metadata`, `responses-safety-identifier`, `responses-user-deprecated`, `responses-truncation-auto`, `responses-context-management`, `responses-conversation`, `responses-prompt-template`, `responses-store-false`, `responses-store-true-unsupported`, `responses-previous-response-id-unsupported`, `responses-background-unsupported`, `responses-background-stream-unsupported`, `responses-service-tier-auto-unsupported` | `/responses` | `gpt-5.5` | Supported stateless controls may pass; stateful/background controls currently must return clean `unsupported` unless explicitly probed as supported |
+| Responses tools and structured output | `responses-max-tool-calls-1`, `responses-function-call-output-input`, `responses-parallel-tool-calls-false`, `responses-tool-choice-function-object`, `responses-tool-choice-allowed-tools`, `responses-web-search-tool`, `responses-web-search-preview-tool`, `responses-file-search-tool`, `responses-image-generation-tool`, `responses-mcp-tool`, `responses-computer-use-preview-tool`, `responses-tool-search-tool`, `responses-local-shell-tool`, `responses-shell-tool`, `responses-custom-tool`, `responses-namespace-tool`, `responses-apply-patch-tool`, `responses-code-interpreter-tool-unsupported`, `responses-text-format-json-object`, `responses-text-format-json-schema` | `/responses` | `gpt-5.5` | Function/tool controls and accepted hosted tools may pass; unsupported hosted tools must return clean `unsupported` |
+| Responses multimodal and files | `responses-input-image-url`, `responses-input-image-data-url`, `responses-input-file-url` | `/responses` | `gpt-5.5` | `supported` or clean `unsupported` |
 | Official Responses subroutes | `responses-get-by-id-unsupported`, `responses-delete-by-id-unsupported`, `responses-cancel-unsupported`, `responses-input-items-unsupported`, `responses-input-tokens-unsupported`, `responses-compact-unsupported` | `/responses/{id}`, `/responses/{id}/cancel`, `/responses/{id}/input_items`, `/responses/input_tokens`, `/responses/compact` | `gpt-5.5` | Current Copilot behavior must be clean `unsupported` |
-| Native Anthropic passthrough | `native-anthropic-baseline`, `native-anthropic-reasoning-effort-high`, `native-anthropic-reasoning-effort-max`, `native-anthropic-json-schema`, `native-anthropic-thinking-display-omitted`, `native-anthropic-document-text`, `native-anthropic-document-url-pdf`, `native-anthropic-document-citations`, `native-anthropic-cache-control`, `native-anthropic-image-base64`, `native-anthropic-image-url-rejected`, `native-anthropic-files-api-unsupported` | `/v1/messages`, `/v1/files` | `claude-opus-4.6` | Known supported native Anthropic features must succeed; known upstream gaps such as native `json_schema` and URL documents must return clean `unsupported` |
+| Native Anthropic passthrough | `native-anthropic-baseline`, `native-anthropic-reasoning-effort-high`, `native-anthropic-reasoning-effort-max`, `native-anthropic-json-schema`, `native-anthropic-thinking-display-omitted`, `native-anthropic-document-text`, `native-anthropic-document-url-pdf`, `native-anthropic-document-citations`, `native-anthropic-cache-control`, `native-anthropic-image-base64`, `native-anthropic-image-url-rejected`, `native-anthropic-files-api-unsupported` | `/v1/messages`, `/v1/files` | `claude-opus-4.6` | Known supported native Anthropic features, including `json_schema`, must succeed; known upstream gaps such as URL documents, top-level `cache_control`, and Files API must return clean `unsupported` |
 
 ## How to run the live probes
 
@@ -71,6 +76,7 @@ Optional environment variables:
 - `COPILOT_VSCODE_VERSION=1.104.3`
 - `COPILOT_LIVE_CLAUDE_MODEL=claude-opus-4.6`
 - `COPILOT_LIVE_RESPONSES_MODEL=gpt-5.5`
+- `COPILOT_LIVE_RESPONSES_ONLY=1` to run only GPT-5.5 `/responses` and raw `/responses/*` probes
 - `COPILOT_LIVE_IMAGE_URL=https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png`
 - `COPILOT_LIVE_FILE_URL=https://www.berkshirehathaway.com/letters/2024ltr.pdf`
 - `COPILOT_LIVE_TIMEOUT_MS=180000`
@@ -83,6 +89,16 @@ COPILOT_LIVE_TEST=1 \
 COPILOT_TOKEN=ghu_xxx \
 COPILOT_LIVE_CLAUDE_MODEL=claude-opus-4.6 \
 COPILOT_LIVE_RESPONSES_MODEL=gpt-5.5 \
+bun run test:live:copilot
+```
+
+Responses-only baseline:
+
+```sh
+COPILOT_LIVE_TEST=1 \
+COPILOT_TOKEN=ghu_xxx \
+COPILOT_LIVE_RESPONSES_MODEL=gpt-5.5 \
+COPILOT_LIVE_RESPONSES_ONLY=1 \
 bun run test:live:copilot
 ```
 

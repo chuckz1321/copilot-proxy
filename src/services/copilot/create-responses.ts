@@ -314,7 +314,27 @@ function hasInlineImageData(part: Record<string, unknown>): boolean {
 
 // Payload types
 
-export type ResponsesToolChoice = 'none' | 'auto' | 'required' | { type: 'function', name: string }
+type ResponsesHostedToolChoiceType
+  = | 'file_search'
+    | 'web_search_preview'
+    | 'computer'
+    | 'computer_use_preview'
+    | 'computer_use'
+    | 'web_search_preview_2025_03_11'
+    | 'image_generation'
+    | 'code_interpreter'
+
+export type ResponsesToolChoice
+  = | 'none'
+    | 'auto'
+    | 'required'
+    | { type: 'function', name: string }
+    | { type: 'allowed_tools', mode: 'auto' | 'required', tools: Array<Record<string, unknown>> }
+    | { type: 'mcp', server_label: string, name?: string | null }
+    | { type: 'custom', name: string }
+    | { type: ResponsesHostedToolChoiceType }
+    | { type: 'apply_patch' }
+    | { type: 'shell' }
 
 export interface ResponsesTextConfig {
   format?: {
@@ -333,6 +353,7 @@ export interface ResponsesPayload {
   reasoning?: {
     effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
     summary?: 'auto' | 'concise' | 'detailed' | 'none'
+    generate_summary?: 'auto' | 'concise' | 'detailed' | null
   }
   text?: ResponsesTextConfig
   parallel_tool_calls?: boolean
@@ -340,15 +361,28 @@ export interface ResponsesPayload {
   store?: boolean
   background?: boolean
   stream?: boolean
+  stream_options?: {
+    include_obfuscation?: boolean
+  } | null
   include?: Array<string>
   prompt_cache_key?: string
+  prompt_cache_retention?: 'in_memory' | '24h' | string | null
   truncation?: 'auto' | 'disabled' | string
   context_management?: Array<ResponsesContextManagementItem> | null
   max_tool_calls?: number | null
   service_tier?: string | null
+  conversation?: string | { id: string } | null
+  prompt?: {
+    id: string
+    version?: string | null
+    variables?: Record<string, unknown> | null
+  } | null
   metadata?: Record<string, unknown> | null
+  safety_identifier?: string
+  user?: string
   temperature?: number | null
   top_p?: number | null
+  top_logprobs?: number | null
   max_output_tokens?: number | null
 }
 

@@ -446,7 +446,7 @@ function translateResponsesToAnthropicToolChoice(
   else if (toolChoice === 'none') {
     mapped = { type: 'none' }
   }
-  else if (typeof toolChoice === 'object' && 'name' in toolChoice) {
+  else if (typeof toolChoice === 'object' && 'name' in toolChoice && typeof toolChoice.name === 'string') {
     mapped = { type: 'tool', name: toolChoice.name }
   }
 

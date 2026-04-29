@@ -74,6 +74,7 @@ interface ResponsesReasoningProbePayload extends Omit<ResponsesPayload, 'reasoni
   reasoning?: {
     effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
     summary?: 'auto' | 'concise' | 'detailed' | 'none'
+    generate_summary?: 'auto' | 'concise' | 'detailed' | null
   }
 }
 
@@ -82,6 +83,9 @@ const NOOP_TOOL_SCHEMA = {
   properties: {},
   additionalProperties: false,
 } as const
+
+const TINY_PNG_DATA_URL
+  = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAABjElEQVR4nAXBkQIAIAxAweEwDMMwDMNhOByGw/39604QQYUmdGEIU1jCFo5gwhVcCOEJKZQIoqjSlK4MZSpL2cpRTLmKK6E8JZVSQRraaI3eGI3ZWI3dOA1r3IY3ovEa2agmSEc7rdM7ozM7q7M7p2Od2/FOdF4nO9UFGeigDfpgDOZgDfbgDGxwBz6IwRvkoIYgE520SZ+MyZysyZ6ciU3uxCcxeZOc1BRkoYu26IuxmIu12IuzsMVd+CIWb5GLWoJsdNM2fTM2c7M2e3M2trkb38TmbXJTW5CDHtqhH8ZhHtZhH87BDvfghzi8Qx7qCGKo0YxuDGMay9jGMcy4hhthPCONMkEuemmXfhmXeVmXfTkXu9yLX+LyLnmpK4ijTnO6M5zpLGc7xzHnOu6E85x0ygUJNGhBD0YwgxXs4AQW3MCDCF6QQYUgD320R3+Mx3ysx36chz3uwx/xeI981BMk0aQlPRnJTFayk5NYchNPInlJJpWCFFq0ohejmMUqdnEKK27hRRSvyKLqA5W0dxDdq+ReAAAAAElFTkSuQmCC'
 
 function buildUnsupportedMatcher(fieldTerms: Array<string>) {
   return (details: ProbeErrorDetails): boolean => {
@@ -163,6 +167,19 @@ function buildNoopResponsesToolPayload(config: LiveCopilotProbeConfig): Response
       },
     ],
     tool_choice: 'required',
+  }
+}
+
+function buildHostedToolPresencePayload(
+  config: LiveCopilotProbeConfig,
+  tool: NonNullable<ResponsesPayload['tools']>[number],
+): ResponsesPayload {
+  return {
+    model: config.responsesModel,
+    input: 'Reply with OK without using tools.',
+    max_output_tokens: 16,
+    tools: [tool],
+    tool_choice: 'none',
   }
 }
 
@@ -265,6 +282,36 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
         model: config.responsesModel,
         input: 'Say hello.',
         stream: true,
+        max_output_tokens: 32,
+      },
+      expectedBody: 'response_stream',
+      model: config.responsesModel,
+    }),
+  },
+  {
+    id: 'responses-stream-options-include-obfuscation-false',
+    title: 'Responses streaming accepts stream_options.include_obfuscation=false',
+    tier: 'optional',
+    endpoint: 'responses-raw',
+    candidateFix: 'Forward stream_options only if Copilot accepts the official Responses streaming options object.',
+    candidateMapping: 'OpenAI Responses stream_options.include_obfuscation=false -> Copilot /responses SSE',
+    rationale: 'stream_options is part of the official streaming request surface and is not exercised by plain stream=true.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'stream_options',
+      'include_obfuscation',
+      'obfuscation',
+    ]),
+    buildRequest: config => ({
+      method: 'POST',
+      path: '/responses',
+      body: {
+        model: config.responsesModel,
+        input: 'Say hello.',
+        stream: true,
+        stream_options: {
+          include_obfuscation: false,
+        },
         max_output_tokens: 32,
       },
       expectedBody: 'response_stream',
@@ -469,8 +516,8 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
     endpoint: 'responses',
     candidateFix: 'If Anthropic max-effort needs an adaptation on Responses-backed models, only target Copilot reasoning.effort=xhigh once upstream support is confirmed.',
     candidateMapping: 'Anthropic output_config.effort=max -> Responses reasoning.effort=xhigh',
-    rationale: 'Anthropic max-effort is Claude-specific. For Responses-backed models we should validate the native Copilot/OpenAI-style high-end value rather than forwarding raw max.',
-    expectation: 'support_or_clean_unsupported',
+    rationale: 'Anthropic max-effort is Claude-specific. GPT-5.5 supports native Responses reasoning.effort=xhigh, so this probe guards the max-effort mapping target.',
+    expectation: 'must_support',
     isUnsupported: buildUnsupportedMatcher([
       'reasoning',
       'effort',
@@ -516,6 +563,72 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
     }),
   },
   {
+    id: 'responses-reasoning-summary-concise',
+    title: 'Responses accepts reasoning.summary=concise',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Preserve reasoning.summary=concise for Responses-backed models if Copilot accepts it.',
+    candidateMapping: 'OpenAI Responses reasoning.summary=concise -> Copilot /responses',
+    rationale: 'The official Responses reasoning schema exposes concise summaries separately from auto.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'reasoning',
+      'summary',
+      'concise',
+    ]),
+    buildPayload: config => ({
+      ...buildResponsesReasoningProbePayload(config, 'low'),
+      reasoning: {
+        effort: 'low',
+        summary: 'concise',
+      },
+    }),
+  },
+  {
+    id: 'responses-reasoning-summary-detailed',
+    title: 'Responses accepts reasoning.summary=detailed',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Preserve reasoning.summary=detailed for Responses-backed models if Copilot accepts it.',
+    candidateMapping: 'OpenAI Responses reasoning.summary=detailed -> Copilot /responses',
+    rationale: 'Detailed summaries are a distinct official reasoning-summary level and can have different model support from auto or concise.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'reasoning',
+      'summary',
+      'detailed',
+    ]),
+    buildPayload: config => ({
+      ...buildResponsesReasoningProbePayload(config, 'low'),
+      reasoning: {
+        effort: 'low',
+        summary: 'detailed',
+      },
+    }),
+  },
+  {
+    id: 'responses-reasoning-generate-summary-auto-deprecated',
+    title: 'Responses accepts deprecated reasoning.generate_summary=auto',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward or normalize deprecated generate_summary only after Copilot behavior is known.',
+    candidateMapping: 'OpenAI Responses reasoning.generate_summary=auto -> Copilot /responses',
+    rationale: 'The current OpenAPI schema still lists generate_summary as deprecated, so older clients may emit it.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'reasoning',
+      'generate_summary',
+      'summary',
+    ]),
+    buildPayload: config => ({
+      ...buildResponsesReasoningProbePayload(config, 'low'),
+      reasoning: {
+        effort: 'low',
+        generate_summary: 'auto',
+      },
+    }),
+  },
+  {
     id: 'responses-include-encrypted-reasoning',
     title: 'Responses accepts include=reasoning.encrypted_content',
     tier: 'optional',
@@ -533,6 +646,63 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
       ...buildResponsesReasoningProbePayload(config, 'low'),
       include: ['reasoning.encrypted_content'],
       store: false,
+    }),
+  },
+  {
+    id: 'responses-include-output-logprobs',
+    title: 'Responses accepts include=message.output_text.logprobs',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward output logprob requests only if Copilot accepts both include and top_logprobs.',
+    candidateMapping: 'OpenAI Responses include message.output_text.logprobs + top_logprobs -> Copilot /responses',
+    rationale: 'The official include enum exposes output text logprobs, and top_logprobs is the corresponding output-control field.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'include',
+      'message.output_text.logprobs',
+      'top_logprobs',
+      'logprobs',
+    ]),
+    buildPayload: config => ({
+      ...buildBasicResponsesPayload(config),
+      include: ['message.output_text.logprobs'],
+      top_logprobs: 1,
+    }),
+  },
+  {
+    id: 'responses-include-input-image-url',
+    title: 'Responses accepts include=message.input_image.image_url',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward input image URL include flags only if Copilot accepts the include value with image input.',
+    candidateMapping: 'OpenAI Responses include message.input_image.image_url -> Copilot /responses',
+    rationale: 'The official include enum can ask the response to echo input image URLs, which is separate from accepting the image part itself.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'include',
+      'message.input_image.image_url',
+      'image_url',
+      'input_image',
+    ]),
+    buildPayload: config => ({
+      model: config.responsesModel,
+      input: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: 'Reply with OK.',
+            },
+            {
+              type: 'input_image',
+              image_url: TINY_PNG_DATA_URL,
+            },
+          ],
+        },
+      ],
+      include: ['message.input_image.image_url'],
+      max_output_tokens: 16,
     }),
   },
   {
@@ -611,6 +781,79 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
     }),
   },
   {
+    id: 'responses-prompt-cache-retention-in-memory',
+    title: 'Responses accepts prompt_cache_retention=in_memory',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward prompt_cache_retention only if Copilot accepts the official cache-retention field.',
+    candidateMapping: 'OpenAI Responses prompt_cache_retention=in_memory -> Copilot /responses',
+    rationale: 'The official Responses schema exposes prompt cache retention separately from prompt_cache_key.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'prompt_cache_retention',
+      'cache retention',
+      'cache',
+    ]),
+    buildPayload: config => ({
+      ...buildBasicResponsesPayload(config),
+      prompt_cache_retention: 'in_memory',
+    }),
+  },
+  {
+    id: 'responses-metadata',
+    title: 'Responses accepts metadata',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Preserve metadata on Responses requests only if Copilot accepts the official metadata field.',
+    candidateMapping: 'OpenAI Responses metadata -> Copilot /responses',
+    rationale: 'Metadata is part of the shared Responses request surface and can be emitted by OpenAI-compatible clients.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'metadata',
+    ]),
+    buildPayload: config => ({
+      ...buildBasicResponsesPayload(config),
+      metadata: {
+        probe: 'copilot-capability-matrix',
+      },
+    }),
+  },
+  {
+    id: 'responses-safety-identifier',
+    title: 'Responses accepts safety_identifier',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward safety_identifier only if Copilot accepts the official abuse-detection identifier field.',
+    candidateMapping: 'OpenAI Responses safety_identifier -> Copilot /responses',
+    rationale: 'The current OpenAPI schema replaces the deprecated user field with safety_identifier for abuse detection.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'safety_identifier',
+      'safety identifier',
+    ]),
+    buildPayload: config => ({
+      ...buildBasicResponsesPayload(config),
+      safety_identifier: 'copilot-proxy-live-probe',
+    }),
+  },
+  {
+    id: 'responses-user-deprecated',
+    title: 'Responses accepts deprecated user',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward or normalize deprecated user only after Copilot behavior is known.',
+    candidateMapping: 'OpenAI Responses user -> Copilot /responses',
+    rationale: 'The OpenAPI schema still accepts user as a deprecated compatibility field, and older clients may still send it.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'user',
+    ]),
+    buildPayload: config => ({
+      ...buildBasicResponsesPayload(config),
+      user: 'copilot-proxy-live-probe',
+    }),
+  },
+  {
     id: 'responses-truncation-auto',
     title: 'Responses accepts truncation=auto',
     tier: 'optional',
@@ -650,6 +893,47 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
           compact_threshold: 1000,
         },
       ],
+    }),
+  },
+  {
+    id: 'responses-conversation',
+    title: 'Responses accepts conversation state field',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward the official conversation field only with GPT-5.5 live coverage, because previous_response_id is still rejected separately.',
+    candidateMapping: 'OpenAI Responses conversation -> Copilot /responses',
+    rationale: 'GPT-5.5 currently accepts the official conversation field even though previous_response_id remains unsupported.',
+    expectation: 'must_support',
+    isUnsupported: buildNotFoundOrUnsupportedMatcher([
+      'conversation',
+      'conv_live_probe_missing',
+      'not found',
+    ]),
+    buildPayload: config => ({
+      ...buildBasicResponsesPayload(config),
+      conversation: 'conv_live_probe_missing',
+    }),
+  },
+  {
+    id: 'responses-prompt-template',
+    title: 'Responses accepts prompt template references',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward prompt template references only if Copilot accepts the official prompt object.',
+    candidateMapping: 'OpenAI Responses prompt.id -> Copilot /responses',
+    rationale: 'Reusable prompt templates are part of the official Responses request surface, but Copilot may not expose OpenAI prompt resources.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildNotFoundOrUnsupportedMatcher([
+      'prompt',
+      'pmpt_live_probe_missing',
+      'not found',
+    ]),
+    buildPayload: config => ({
+      ...buildBasicResponsesPayload(config),
+      prompt: {
+        id: 'pmpt_live_probe_missing',
+        variables: {},
+      },
     }),
   },
   {
@@ -744,18 +1028,26 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
     id: 'responses-service-tier-auto-unsupported',
     title: 'Responses rejects service_tier=auto',
     tier: 'optional',
-    endpoint: 'responses',
+    endpoint: 'responses-raw',
     candidateFix: 'Avoid forwarding unsupported service_tier values to Copilot unless upstream changes.',
     candidateMapping: 'OpenAI Responses service_tier=auto -> Copilot /responses',
-    rationale: 'OpenAI-compatible clients may send service_tier, but current Copilot validation does not accept auto.',
+    rationale: 'OpenAI-compatible clients may send service_tier, but current Copilot validation does not accept auto. This probe bypasses local sanitization so it tests the GitHub backend directly.',
     expectation: 'must_be_unsupported',
     isUnsupported: buildUnsupportedMatcher([
       'service_tier',
       'service tier',
     ]),
-    buildPayload: config => ({
-      ...buildBasicResponsesPayload(config),
-      service_tier: 'auto',
+    buildRequest: config => ({
+      method: 'POST',
+      path: '/responses',
+      body: {
+        model: config.responsesModel,
+        input: 'Reply with the single word OK.',
+        max_output_tokens: 16,
+        service_tier: 'auto',
+      },
+      expectedBody: 'response',
+      model: config.responsesModel,
     }),
   },
   {
@@ -774,6 +1066,46 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
     buildPayload: config => ({
       ...buildNoopResponsesToolPayload(config),
       max_tool_calls: 1,
+    }),
+  },
+  {
+    id: 'responses-function-call-output-input',
+    title: 'Responses accepts function_call_output input items',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Pass stateless tool-result turns through Responses only if Copilot accepts function_call/function_call_output input items.',
+    candidateMapping: 'OpenAI Responses function_call_output input -> Copilot /responses',
+    rationale: 'Stateless tool loops in Responses can replay function call items directly in input, independent of previous_response_id.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'function_call',
+      'function_call_output',
+      'call_id',
+      'input',
+    ]),
+    buildPayload: config => ({
+      model: config.responsesModel,
+      input: [
+        {
+          type: 'function_call',
+          id: 'fc_live_probe_noop',
+          call_id: 'call_live_probe_noop',
+          name: 'noop',
+          arguments: '{}',
+          status: 'completed',
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_live_probe_noop',
+          output: '{"ok":true}',
+        },
+        {
+          role: 'user',
+          content: 'Use the tool output and reply with OK.',
+        },
+      ],
+      max_output_tokens: 16,
+      store: false,
     }),
   },
   {
@@ -806,6 +1138,56 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
     }),
   },
   {
+    id: 'responses-tool-choice-function-object',
+    title: 'Responses accepts tool_choice function object',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward structured function tool_choice only if Copilot accepts the official object form.',
+    candidateMapping: 'OpenAI Responses tool_choice={type:function,name} -> Copilot /responses',
+    rationale: 'The official Responses tool_choice schema includes object forms beyond none/auto/required strings.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'tool_choice',
+      'tool choice',
+      'function',
+    ]),
+    buildPayload: config => ({
+      ...buildNoopResponsesToolPayload(config),
+      tool_choice: {
+        type: 'function',
+        name: 'noop',
+      },
+    }),
+  },
+  {
+    id: 'responses-tool-choice-allowed-tools',
+    title: 'Responses accepts tool_choice allowed_tools object',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward allowed_tools constraints only if Copilot accepts the official tool_choice shape.',
+    candidateMapping: 'OpenAI Responses tool_choice={type:allowed_tools,...} -> Copilot /responses',
+    rationale: 'Allowed-tools constraints are a distinct official tool-routing control for large tool sets.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'tool_choice',
+      'allowed_tools',
+      'allowed tools',
+    ]),
+    buildPayload: config => ({
+      ...buildNoopResponsesToolPayload(config),
+      tool_choice: {
+        type: 'allowed_tools',
+        mode: 'required',
+        tools: [
+          {
+            type: 'function',
+            name: 'noop',
+          },
+        ],
+      },
+    }),
+  },
+  {
     id: 'responses-web-search-tool',
     title: 'Responses accepts web_search tool',
     tier: 'optional',
@@ -819,15 +1201,113 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
       'web search',
       'tool',
     ]),
-    buildPayload: config => ({
-      model: config.responsesModel,
-      input: 'Reply with OK without using tools.',
-      max_output_tokens: 16,
-      tools: [
-        {
-          type: 'web_search',
-        },
-      ],
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'web_search',
+    }),
+  },
+  {
+    id: 'responses-web-search-preview-tool',
+    title: 'Responses accepts web_search_preview tool',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward web_search_preview tools for Responses-backed models only if Copilot accepts them.',
+    candidateMapping: 'OpenAI hosted web_search_preview tool -> Copilot /responses',
+    rationale: 'The official OpenAPI still exposes the preview web search tool alongside the newer web_search shape.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'web_search_preview',
+      'web search',
+      'tool',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'web_search_preview',
+    }),
+  },
+  {
+    id: 'responses-file-search-tool',
+    title: 'Responses accepts file_search tool shape',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward file_search tools only after Copilot accepts the official tool shape and resource behavior is understood.',
+    candidateMapping: 'OpenAI hosted file_search tool -> Copilot /responses',
+    rationale: 'File search is a core hosted Responses tool and is distinct from raw input_file parts.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildNotFoundOrUnsupportedMatcher([
+      'file_search',
+      'file search',
+      'vector_store',
+      'vector store',
+      'tool',
+      'not found',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'file_search',
+      vector_store_ids: ['vs_live_probe_missing'],
+    }),
+  },
+  {
+    id: 'responses-image-generation-tool',
+    title: 'Responses accepts image_generation tool shape',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward image_generation tools only if Copilot accepts the official hosted image tool shape.',
+    candidateMapping: 'OpenAI hosted image_generation tool -> Copilot /responses',
+    rationale: 'Image generation is part of the official Responses tool union and has a separate schema from image inputs.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'image_generation',
+      'image generation',
+      'tool',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'image_generation',
+      quality: 'low',
+      size: '1024x1024',
+    }),
+  },
+  {
+    id: 'responses-mcp-tool',
+    title: 'Responses accepts mcp tool shape',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward remote MCP tools only if Copilot accepts the official mcp tool shape.',
+    candidateMapping: 'OpenAI Responses mcp tool -> Copilot /responses',
+    rationale: 'Remote MCP is an official Responses tool family and should be probed separately from local proxy MCP handling.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'mcp',
+      'server_url',
+      'server_label',
+      'tool',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'mcp',
+      server_label: 'live_probe',
+      server_url: 'https://example.com/mcp',
+    }),
+  },
+  {
+    id: 'responses-computer-use-preview-tool',
+    title: 'Responses accepts computer_use_preview tool shape',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward computer use tools only if Copilot accepts the official computer_use_preview shape.',
+    candidateMapping: 'OpenAI hosted computer_use_preview tool -> Copilot /responses',
+    rationale: 'Computer use is part of the official Responses hosted-tool union and has required display/environment fields.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'computer_use_preview',
+      'computer use',
+      'display_width',
+      'display_height',
+      'environment',
+      'tool',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'computer_use_preview',
+      environment: 'browser',
+      display_width: 1024,
+      display_height: 768,
     }),
   },
   {
@@ -851,9 +1331,124 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
       tools: [
         {
           type: 'tool_search',
-          max_tool_count: 1,
+          execution: 'server',
+        },
+        {
+          type: 'function',
+          name: 'deferred_noop',
+          description: 'A deferred no-op tool used for capability probing.',
+          parameters: { ...NOOP_TOOL_SCHEMA },
+          defer_loading: true,
         },
       ],
+      tool_choice: 'none',
+    }),
+  },
+  {
+    id: 'responses-local-shell-tool',
+    title: 'Responses accepts local_shell tool shape',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward local_shell tool declarations only if Copilot accepts the official local shell tool shape.',
+    candidateMapping: 'OpenAI Responses local_shell tool -> Copilot /responses',
+    rationale: 'Local shell is part of the current Responses tool union used by coding agents.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'local_shell',
+      'local shell',
+      'tool',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'local_shell',
+    }),
+  },
+  {
+    id: 'responses-shell-tool',
+    title: 'Responses accepts shell tool shape',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward shell tool declarations only if Copilot accepts the official shell tool shape.',
+    candidateMapping: 'OpenAI Responses shell tool -> Copilot /responses',
+    rationale: 'Hosted/container shell is part of the official Responses tool union and has a different schema from local_shell.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'shell',
+      'container_auto',
+      'environment',
+      'tool',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'shell',
+      environment: {
+        type: 'container_auto',
+      },
+    }),
+  },
+  {
+    id: 'responses-custom-tool',
+    title: 'Responses accepts custom tool shape',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward custom tools only if Copilot accepts the official Responses custom tool shape.',
+    candidateMapping: 'OpenAI Responses custom tool -> Copilot /responses',
+    rationale: 'Custom tools are a separate official tool family from JSON-schema function tools.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'custom',
+      'format',
+      'tool',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'custom',
+      name: 'noop_custom',
+      format: {
+        type: 'text',
+      },
+    }),
+  },
+  {
+    id: 'responses-namespace-tool',
+    title: 'Responses accepts namespace tool shape',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward namespace tools only if Copilot accepts the official grouped-tool shape.',
+    candidateMapping: 'OpenAI Responses namespace tool -> Copilot /responses',
+    rationale: 'Namespace tools are part of the current Responses tool union and affect large tool-catalog routing.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'namespace',
+      'tools',
+      'tool',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'namespace',
+      name: 'probe',
+      description: 'Live probe namespace.',
+      tools: [
+        {
+          type: 'function',
+          name: 'noop',
+          parameters: { ...NOOP_TOOL_SCHEMA },
+        },
+      ],
+    }),
+  },
+  {
+    id: 'responses-apply-patch-tool',
+    title: 'Responses accepts apply_patch tool shape',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward apply_patch tools only if Copilot accepts the official coding-agent tool shape.',
+    candidateMapping: 'OpenAI Responses apply_patch tool -> Copilot /responses',
+    rationale: 'Apply patch is now part of the official Responses tool union and is relevant to coding-agent traffic.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'apply_patch',
+      'apply patch',
+      'tool',
+    ]),
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'apply_patch',
     }),
   },
   {
@@ -870,15 +1465,11 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
       'code interpreter',
       'tool',
     ]),
-    buildPayload: config => ({
-      model: config.responsesModel,
-      input: 'Reply with OK without using tools.',
-      max_output_tokens: 16,
-      tools: [
-        {
-          type: 'code_interpreter',
-        },
-      ],
+    buildPayload: config => buildHostedToolPresencePayload(config, {
+      type: 'code_interpreter',
+      container: {
+        type: 'auto',
+      },
     }),
   },
   {
@@ -1036,6 +1627,41 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
             {
               type: 'input_image',
               image_url: config.imageUrl,
+            },
+          ],
+        },
+      ],
+      max_output_tokens: 16,
+    }),
+  },
+  {
+    id: 'responses-input-image-data-url',
+    title: 'Responses accepts data URL image input',
+    tier: 'optional',
+    endpoint: 'responses',
+    candidateFix: 'Forward data URL image inputs only if Copilot accepts the official input_image image_url data URL form.',
+    candidateMapping: 'OpenAI Responses input_image.image_url=data URL -> Copilot /responses',
+    rationale: 'OpenAI-compatible clients commonly use data URLs for inline images, which differs from externally fetched URL images.',
+    expectation: 'support_or_clean_unsupported',
+    isUnsupported: buildUnsupportedMatcher([
+      'image_url',
+      'data url',
+      'data:',
+      'input_image',
+    ]),
+    buildPayload: config => ({
+      model: config.responsesModel,
+      input: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: 'Reply with OK if you can accept this image input.',
+            },
+            {
+              type: 'input_image',
+              image_url: TINY_PNG_DATA_URL,
             },
           ],
         },
@@ -1271,13 +1897,13 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
   },
   {
     id: 'native-anthropic-json-schema',
-    title: 'Native Anthropic json_schema structured output (expected rejection)',
+    title: 'Native Anthropic json_schema structured output',
     tier: 'optional',
     endpoint: 'anthropic-messages',
-    expectation: 'must_be_unsupported',
-    candidateFix: 'Keep native passthrough behavior and surface the upstream output_config.format rejection until Copilot implements Anthropic structured outputs.',
-    candidateMapping: 'Anthropic output_config.format=json_schema -> Copilot /v1/messages output_config.format rejection',
-    rationale: 'Official Anthropic structured output uses json_schema, but current Copilot native /v1/messages rejects output_config.format and Claude chat-completions does not enforce equivalent schema output reliably.',
+    expectation: 'must_support',
+    candidateFix: 'Keep native passthrough for Anthropic json_schema structured output; do not reroute it through Claude chat-completions.',
+    candidateMapping: 'Anthropic output_config.format=json_schema -> Copilot /v1/messages output_config.format',
+    rationale: 'GPT-5.5 Responses probing is separate; current Claude native /v1/messages accepts official Anthropic json_schema structured output.',
     isUnsupported: buildUnsupportedMatcher([
       'output_config.format',
       'format',
@@ -1391,10 +2017,14 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
     title: 'Native Anthropic top-level cache_control',
     tier: 'optional',
     endpoint: 'anthropic-messages',
-    expectation: 'must_support',
-    candidateFix: 'Keep official top-level cache_control on native passthrough now that Copilot /v1/messages accepts it.',
+    expectation: 'must_be_unsupported',
+    candidateFix: 'Do not forward top-level cache_control on native passthrough until Copilot /v1/messages accepts it.',
     candidateMapping: 'Anthropic top-level cache_control -> Copilot /v1/messages cache_control',
-    rationale: 'Copilot upstream now accepts the official top-level cache_control field.',
+    rationale: 'Current Copilot native /v1/messages rejects top-level cache_control with an extra-inputs validation error.',
+    isUnsupported: buildUnsupportedMatcher([
+      'cache_control',
+      'extra inputs',
+    ]),
     buildPayload: config => ({
       model: config.claudeModel,
       max_tokens: 32,
