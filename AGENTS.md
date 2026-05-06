@@ -55,6 +55,13 @@
 - When changing Responses routing, tool handling, MCP behavior, web search, image inputs, or structured output, run a real `codex` CLI smoke against the local `/v1/responses` proxy. Keep Codex config temporary, for example with `CODEX_HOME=/tmp/...`, and do not modify the user's `~/.codex`.
 - When changing Anthropic `/v1/messages` routing, native passthrough sanitization, thinking/output_config handling, or Claude Code tool behavior, run a real `claude` CLI smoke against the local proxy. Use temporary local state and follow [the Claude Code smoke guidance](docs/copilot-capability-validation.md#claude-code-cli-smoke-tests).
 
+## Request Abort and Upstream Cancellation Policy
+
+- Do not pass Hono inbound request abort signals, especially `c.req.raw.signal`, into Copilot upstream fetch calls. This has repeatedly caused proxy clients such as NewAPI to surface 500s when the inbound request signal cancels upstream `/v1/responses` or `/v1/messages` work.
+- Handle client disconnects at the response streaming boundary instead: check `stream.aborted` while writing SSE and stop writing to the client when needed. Do not use the inbound request signal as upstream cancellation unless there is fresh production evidence and the regression tests are updated deliberately.
+- Before changing request-signal behavior, inspect `git log -S "signal: c.req.raw.signal"` and `tests/request-signal-regression.test.ts` to understand the v0.6.1/v0.7.6/v0.7.7 regression history. Treat reversing that test's semantic direction as high risk.
+- When editing routes or services that call `createResponses`, `createAnthropicMessages`, `createChatCompletions`, `createEmbeddings`, or `forwardResponsesEndpoint`, run `bun test tests/request-signal-regression.test.ts`. The test's intent is to fail if any normal route forwards an inbound request signal upstream.
+
 ---
 
 This file is tailored for agentic coding agents. For more details, see the configs in `eslint.config.js` and `tsconfig.json`. No Cursor or Copilot rules detected.
