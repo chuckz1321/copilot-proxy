@@ -26,7 +26,7 @@ import {
 } from '~/lib/translation'
 import { translateResponsesRequestToAnthropic } from '~/lib/translation/responses-to-anthropic'
 import { forwardUpstreamHeaders } from '~/lib/upstream-headers'
-import { validateBody } from '~/lib/validate'
+import { readJsonBodyText, validateBody } from '~/lib/validate'
 import { createAnthropicMessages } from '~/services/copilot/create-anthropic-messages'
 import { createResponses, forwardResponsesEndpoint, summarizeResponsesPayload } from '~/services/copilot/create-responses'
 
@@ -78,7 +78,7 @@ export async function handleResponsesPassthrough(
   await enforceManualApproval(state)
 
   const url = new URL(c.req.url)
-  const body = method === 'GET' ? undefined : await c.req.text()
+  const body = method === 'GET' ? undefined : await readJsonBodyText(c)
   const requestHeaders: Record<string, string> = {}
   const contentType = c.req.header('content-type')
   if (contentType && body !== undefined) {

@@ -1,7 +1,12 @@
 import type { Context } from 'hono'
 import type { z } from 'zod'
 
+import process from 'node:process'
+
 import { HTTPError } from './error'
+
+export const JSON_BODY_SIZE_LIMIT_ENV = 'COPILOT_PROXY_MAX_JSON_BODY_BYTES'
+export const DEFAULT_MAX_JSON_BODY_BYTES = 32 * 1024 * 1024
 
 /**
  * Parse and validate the JSON body against a Zod schema.
@@ -14,9 +19,11 @@ import { HTTPError } from './error'
  * Throws HTTPError(400) with a clear message on failure.
  */
 export async function validateBody<T>(c: Context, schema: z.ZodType): Promise<T> {
+  const text = await readJsonBodyText(c)
+
   let raw: unknown
   try {
-    raw = await c.req.json()
+    raw = JSON.parse(text)
   }
   catch {
     throw new HTTPError(
@@ -43,4 +50,100 @@ export async function validateBody<T>(c: Context, schema: z.ZodType): Promise<T>
   }
 
   return result.data as T
+}
+
+export async function readJsonBodyText(c: Context): Promise<string> {
+  const maxBytes = getMaxJsonBodyBytes()
+  const declaredBytes = parseContentLength(c.req.header('content-length'))
+  if (declaredBytes !== undefined && declaredBytes > maxBytes) {
+    throwJsonBodyTooLarge(maxBytes, declaredBytes)
+  }
+
+  const body = c.req.raw.body
+  if (!body)
+    return ''
+
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let bodyBytes = 0
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done)
+        break
+
+      bodyBytes += value.byteLength
+      if (bodyBytes > maxBytes) {
+        try {
+          await reader.cancel()
+        }
+        catch {
+          // The request is already being rejected; ignore stream-cancel cleanup errors.
+        }
+        throwJsonBodyTooLarge(maxBytes, bodyBytes)
+      }
+
+      chunks.push(value)
+    }
+  }
+  finally {
+    reader.releaseLock()
+  }
+
+  return decodeUtf8Chunks(chunks, bodyBytes)
+}
+
+function getMaxJsonBodyBytes(): number {
+  const configured = process.env[JSON_BODY_SIZE_LIMIT_ENV]?.trim()
+  if (!configured)
+    return DEFAULT_MAX_JSON_BODY_BYTES
+
+  const parsed = Number(configured)
+  if (Number.isSafeInteger(parsed) && parsed > 0)
+    return parsed
+
+  return DEFAULT_MAX_JSON_BODY_BYTES
+}
+
+function parseContentLength(value: string | undefined): number | undefined {
+  const trimmed = value?.trim()
+  if (!trimmed)
+    return undefined
+  if (!/^\d+$/.test(trimmed))
+    return undefined
+
+  const parsed = Number(trimmed)
+  return Number.isSafeInteger(parsed) ? parsed : Number.POSITIVE_INFINITY
+}
+
+function decodeUtf8Chunks(chunks: Uint8Array[], totalBytes: number): string {
+  if (chunks.length === 1)
+    return new TextDecoder().decode(chunks[0])
+
+  const bytes = new Uint8Array(totalBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+
+  return new TextDecoder().decode(bytes)
+}
+
+function throwJsonBodyTooLarge(maxBytes: number, bodyBytes: number): never {
+  const message = `JSON request body is too large. body_bytes=${bodyBytes} max_body_bytes=${maxBytes}`
+  throw new HTTPError(
+    message,
+    Response.json(
+      {
+        error: {
+          message,
+          type: 'invalid_request_error',
+          code: 'payload_too_large',
+        },
+      },
+      { status: 413 },
+    ),
+  )
 }
