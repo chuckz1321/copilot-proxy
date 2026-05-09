@@ -4,17 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Copilot API Usage Dashboard</title>
-
-    <script src="https://cdn.tailwindcss.com"></script>
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-
-    <script src="https://unpkg.com/lucide-react@0.378.0/dist/umd/lucide.min.js"></script>
+    <link rel="icon" href="data:," />
 
     <style>
       /* Gruvbox-themed color palette */
@@ -57,8 +47,15 @@
       }
 
       /* Custom styles using the new palette */
+      * {
+        box-sizing: border-box;
+      }
+
       body {
-        font-family: "Inter", sans-serif;
+        margin: 0;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
         background-color: var(--color-bg-darkest);
         color: var(--color-fg-light);
       }
@@ -90,9 +87,265 @@
       .input-focus:focus {
         --tw-ring-color: var(--color-blue);
         border-color: var(--color-blue);
+        box-shadow: 0 0 0 1px var(--color-blue);
+        outline: none;
       }
 
-
+      .antialiased {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      .min-h-screen {
+        min-height: 100vh;
+      }
+      .max-w-7xl {
+        max-width: 80rem;
+      }
+      .mx-auto {
+        margin-left: auto;
+        margin-right: auto;
+      }
+      .mt-1 {
+        margin-top: 0.25rem;
+      }
+      .mt-2 {
+        margin-top: 0.5rem;
+      }
+      .mb-2 {
+        margin-bottom: 0.5rem;
+      }
+      .mb-3 {
+        margin-bottom: 0.75rem;
+      }
+      .mb-6 {
+        margin-bottom: 1.5rem;
+      }
+      .mr-3 {
+        margin-right: 0.75rem;
+      }
+      .p-3 {
+        padding: 0.75rem;
+      }
+      .p-4 {
+        padding: 1rem;
+      }
+      .px-2 {
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+      }
+      .px-3 {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+      }
+      .px-4 {
+        padding-left: 1rem;
+        padding-right: 1rem;
+      }
+      .px-5 {
+        padding-left: 1.25rem;
+        padding-right: 1.25rem;
+      }
+      .py-0\.5 {
+        padding-top: 0.125rem;
+        padding-bottom: 0.125rem;
+      }
+      .py-1\.5 {
+        padding-top: 0.375rem;
+        padding-bottom: 0.375rem;
+      }
+      .py-4 {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+      }
+      .py-16 {
+        padding-top: 4rem;
+        padding-bottom: 4rem;
+      }
+      .py-20 {
+        padding-top: 5rem;
+        padding-bottom: 5rem;
+      }
+      .pl-4 {
+        padding-left: 1rem;
+      }
+      .flex {
+        display: flex;
+      }
+      .grid {
+        display: grid;
+      }
+      .flex-col {
+        flex-direction: column;
+      }
+      .items-center {
+        align-items: center;
+      }
+      .justify-center {
+        justify-content: center;
+      }
+      .justify-between {
+        justify-content: space-between;
+      }
+      .gap-2 {
+        gap: 0.5rem;
+      }
+      .gap-3 {
+        gap: 0.75rem;
+      }
+      .gap-4 {
+        gap: 1rem;
+      }
+      .grid-cols-1 {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+      }
+      .w-full {
+        width: 100%;
+      }
+      .h-2 {
+        height: 0.5rem;
+      }
+      .h-4,
+      .w-4 {
+        width: 1rem;
+        height: 1rem;
+      }
+      .h-5,
+      .w-5 {
+        width: 1.25rem;
+        height: 1.25rem;
+      }
+      .h-7,
+      .w-7 {
+        width: 1.75rem;
+        height: 1.75rem;
+      }
+      .h-10,
+      .w-10 {
+        width: 2.5rem;
+        height: 2.5rem;
+      }
+      .h-12,
+      .w-12 {
+        width: 3rem;
+        height: 3rem;
+      }
+      .border {
+        border: 1px solid;
+      }
+      .border-4 {
+        border-width: 4px;
+        border-style: solid;
+      }
+      .border-transparent {
+        border-color: transparent;
+      }
+      .rounded-full {
+        border-radius: 9999px;
+      }
+      .relative {
+        position: relative;
+      }
+      .whitespace-nowrap {
+        white-space: nowrap;
+      }
+      .text-center {
+        text-align: center;
+      }
+      .text-xs {
+        font-size: 0.75rem;
+        line-height: 1rem;
+      }
+      .text-sm {
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+      }
+      .text-md {
+        font-size: 1rem;
+        line-height: 1.5rem;
+      }
+      .text-lg {
+        font-size: 1.125rem;
+        line-height: 1.75rem;
+      }
+      .text-xl {
+        font-size: 1.25rem;
+        line-height: 1.75rem;
+      }
+      .text-2xl {
+        font-size: 1.5rem;
+        line-height: 2rem;
+      }
+      .font-mono {
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+      }
+      .font-medium {
+        font-weight: 500;
+      }
+      .font-semibold {
+        font-weight: 600;
+      }
+      .font-bold {
+        font-weight: 700;
+      }
+      .capitalize {
+        text-transform: capitalize;
+      }
+      .underline {
+        text-decoration-line: underline;
+      }
+      .transition,
+      .transition-colors {
+        transition-duration: 150ms;
+        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .transition-colors {
+        transition-property:
+          color, background-color, border-color, text-decoration-color, fill,
+          stroke;
+      }
+      .mx-auto.h-10 {
+        display: block;
+      }
+      button,
+      input {
+        border-radius: 0;
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+        border: 0;
+      }
+      .animate-spin {
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (min-width: 640px) {
+        .sm\:p-6 {
+          padding: 1.5rem;
+        }
+        .sm\:flex-row {
+          flex-direction: row;
+        }
+        .sm\:w-auto {
+          width: auto;
+        }
+      }
+      @media (min-width: 768px) {
+        .md\:grid-cols-2 {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (min-width: 1024px) {
+        .lg\:grid-cols-3 {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
     </style>
   </head>
   <body class="antialiased">
@@ -114,7 +367,7 @@
               stroke-width="2"
               stroke-linecap="round"
               stroke-linejoin="round"
-              class="lucide lucide-gauge-circle h-7 w-7"
+              class="h-7 w-7"
               style="color: var(--color-aqua-accent)"
             >
               <path d="M15.6 3.3a10 10 0 1 0 5.1 5.1" />
@@ -151,7 +404,7 @@
             <input
               type="text"
               id="endpoint-url"
-              class="w-full px-3 py-1.5 border focus:ring-1 transition input-focus text-sm"
+              class="w-full px-3 py-1.5 border transition input-focus text-sm"
               style="
                 background-color: var(--color-bg-darkest);
                 border-color: var(--color-bg-light-3);
@@ -178,7 +431,7 @@
                 stroke-width="2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
-                class="lucide lucide-refresh-cw h-4 w-4"
+                class="h-4 w-4"
               >
                 <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
                 <path d="M21 3v5h-5" />
@@ -221,15 +474,6 @@
 
         // --- Rendering Logic ---
 
-        /**
-         * Safely calls lucide.createIcons() if the library is available.
-         */
-        function createIcons() {
-          if (typeof lucide !== "undefined") {
-            lucide.createIcons();
-          }
-        }
-
         function escapeHtml(value) {
           return String(value).replace(/[&<>"']/g, (char) => {
             switch (char) {
@@ -247,6 +491,48 @@
                 return char;
             }
           });
+        }
+
+        function iconSvg(name, className = "", style = "") {
+          const icons = {
+            "alert-triangle": `
+              <path d="M21.7 18 13.7 4a2 2 0 0 0-3.4 0L2.3 18a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3Z"></path>
+              <path d="M12 9v4"></path>
+              <path d="M12 17h.01"></path>
+            `,
+            "bar-chart-big": `
+              <path d="M3 3v18h18"></path>
+              <rect x="7" y="10" width="4" height="7" rx="1"></rect>
+              <rect x="15" y="5" width="4" height="12" rx="1"></rect>
+            `,
+            "file-text": `
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path>
+              <path d="M14 2v4a2 2 0 0 0 2 2h4"></path>
+              <path d="M10 9H8"></path>
+              <path d="M16 13H8"></path>
+              <path d="M16 17H8"></path>
+            `,
+            info: `
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M12 16v-4"></path>
+              <path d="M12 8h.01"></path>
+            `,
+          };
+          const paths = icons[name] || "";
+          return `
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="${className}"
+              style="${style}"
+              aria-hidden="true"
+            >${paths}</svg>
+          `;
         }
 
         /**
@@ -267,8 +553,6 @@
           } else {
             contentArea.innerHTML = renderWelcomeMessage();
           }
-          // Replace placeholder icons with actual Lucide icons
-          createIcons();
         }
 
         /**
@@ -288,7 +572,7 @@
           return `
                     <section id="usage-quotas" class="mb-6">
                         <h2 class="text-xl font-bold mb-3 flex items-center gap-2" style="color: var(--color-fg-lightest);">
-                            <i data-lucide="bar-chart-big"></i> Usage Quotas
+                            ${iconSvg("bar-chart-big", "h-5 w-5")} Usage Quotas
                         </h2>
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             ${quotaCards}
@@ -391,7 +675,7 @@
           return `
                     <section id="detailed-data">
                         <h2 class="text-xl font-bold mb-3 flex items-center gap-2" style="color: var(--color-fg-lightest);">
-                           <i data-lucide="file-text"></i> Detailed Information
+                           ${iconSvg("file-text", "h-5 w-5")} Detailed Information
                         </h2>
                         <div class="border p-4 relative font-mono text-xs" style="background-color: var(--color-bg-darkest); border-color: var(--color-bg-light-2);">
                             ${formattedDetails}
@@ -426,21 +710,13 @@
 
           container.innerHTML = `
                 <div class="flex items-center">
-                    <i data-lucide="alert-triangle" class="h-5 w-5 mr-3"></i>
+                    ${iconSvg("alert-triangle", "h-5 w-5 mr-3")}
                     <div>
                         <p class="font-bold text-sm">An Error Occurred</p>
                         <p class="text-xs">${escapeHtml(message)}</p>
                     </div>
                 </div>
             `;
-          // Must create icons *after* innerHTML is set
-          setTimeout(
-            () =>
-              lucide.createIcons({
-                nodes: [container.querySelector("[data-lucide]")],
-              }),
-            0
-          );
           return container.outerHTML;
         }
 
@@ -451,7 +727,7 @@
         function renderWelcomeMessage() {
           return `
             <div class="text-center py-16 px-4 border" style="background-color: var(--color-bg-soft); border-color: var(--color-bg-light-2);">
-                <i data-lucide="info" class="mx-auto h-10 w-10" style="color: var(--color-gray-accent);"></i>
+                ${iconSvg("info", "mx-auto h-10 w-10", "color: var(--color-gray-accent);")}
                 <h3 class="mt-2 text-lg font-semibold" style="color: var(--color-fg-lightest);">Welcome!</h3>
                 <p class="mt-1 text-sm" style="color: var(--color-gray);">Enter an API endpoint URL and click "Fetch" to see usage data.</p>
             </div>
