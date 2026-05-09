@@ -47,8 +47,11 @@ function getShell(): ShellName {
 export function generateEnvScript(
   envVars: EnvVars,
   commandToRun: string = '',
+  options?: {
+    shell?: ShellName
+  },
 ): string {
-  const shell = getShell()
+  const shell = options?.shell ?? getShell()
   const filteredEnvVars = Object.entries(envVars).filter(
     ([, value]) => value !== undefined,
   ) as Array<[string, string]>
@@ -58,26 +61,26 @@ export function generateEnvScript(
   switch (shell) {
     case 'powershell': {
       commandBlock = filteredEnvVars
-        .map(([key, value]) => `$env:${key} = ${value}`)
+        .map(([key, value]) => `$env:${key} = ${quotePowerShell(value)}`)
         .join('; ')
       break
     }
     case 'cmd': {
       commandBlock = filteredEnvVars
-        .map(([key, value]) => `set ${key}=${value}`)
+        .map(([key, value]) => `set "${key}=${value.replace(/"/g, '\\"')}"`)
         .join(' & ')
       break
     }
     case 'fish': {
       commandBlock = filteredEnvVars
-        .map(([key, value]) => `set -gx ${key} ${value}`)
+        .map(([key, value]) => `set -gx ${key} ${quotePosix(value)}`)
         .join('; ')
       break
     }
     default: {
       // bash, zsh, sh
       const assignments = filteredEnvVars
-        .map(([key, value]) => `${key}=${value}`)
+        .map(([key, value]) => `${key}=${quotePosix(value)}`)
         .join(' ')
       commandBlock = filteredEnvVars.length > 0 ? `export ${assignments}` : ''
       break
@@ -85,9 +88,21 @@ export function generateEnvScript(
   }
 
   if (commandBlock && commandToRun) {
-    const separator = shell === 'cmd' ? ' & ' : ' && '
+    const separator = shell === 'cmd'
+      ? ' & '
+      : shell === 'powershell'
+        ? '; '
+        : ' && '
     return `${commandBlock}${separator}${commandToRun}`
   }
 
   return commandBlock || commandToRun
+}
+
+function quotePosix(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function quotePowerShell(value: string): string {
+  return `'${value.replace(/'/g, `''`)}'`
 }
