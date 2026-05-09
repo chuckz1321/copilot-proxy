@@ -12,9 +12,11 @@ export function findModelWithFallback(modelId: string, models: Array<Model> | un
   if (exact)
     return exact
 
-  const baseModel = modelId.replace(/-(fast|1m(?:-internal)?)$/, '')
-  if (baseModel !== modelId)
-    return models.find(model => model.id === baseModel)
+  const prefixMatch = models
+    .filter(model => modelId.startsWith(`${model.id}-`))
+    .sort((a, b) => b.id.length - a.id.length)[0]
+  if (prefixMatch)
+    return prefixMatch
 
   return undefined
 }

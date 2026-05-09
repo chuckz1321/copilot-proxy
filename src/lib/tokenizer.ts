@@ -7,6 +7,8 @@ import type {
 } from '~/services/copilot/create-chat-completions'
 import type { Model } from '~/services/copilot/get-models'
 
+import consola from 'consola'
+
 // Encoder type mapping
 const ENCODING_MAP = {
   o200k_base: () => import('gpt-tokenizer/encoding/o200k_base'),
@@ -115,6 +117,7 @@ async function getEncodeChatFunction(encoding: string): Promise<Encoder> {
 
   const supportedEncoding = encoding as SupportedEncoding
   if (!(supportedEncoding in ENCODING_MAP)) {
+    consola.warn(`Unknown tokenizer encoding "${encoding}", falling back to o200k_base`)
     const fallbackModule = (await ENCODING_MAP.o200k_base()) as Encoder
     encodingCache.set(encoding, fallbackModule)
     return fallbackModule
