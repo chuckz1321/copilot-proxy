@@ -25,7 +25,7 @@ jobs:
 
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@main
+        uses: sigstore/cosign-installer@v3.10.1
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -63,3 +63,16 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           platforms: linux/amd64,linux/arm64
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+
+      - name: Sign Docker image
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            cosign sign --yes "${tag}@${DIGEST}"
+          done <<< "$TAGS"

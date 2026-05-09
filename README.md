@@ -129,20 +129,17 @@ mkdir -p ./copilot-data
 # Run the container with a bind mount to persist the token
 # This ensures your authentication survives container restarts
 
-docker run -p 127.0.0.1:4399:4399 -v $(pwd)/copilot-data:/root/.local/share/copilot-proxy copilot-proxy start --host 0.0.0.0
+docker run -p 127.0.0.1:4399:4399 -v $(pwd)/copilot-data:/home/bun/.local/share/copilot-proxy copilot-proxy start --host 0.0.0.0
 ```
 
 > **Note:**
-> The GitHub token and related data will be stored in `copilot-data` on your host. This is mapped to `/root/.local/share/copilot-proxy` inside the container, ensuring persistence across restarts.
+> The GitHub token and related data will be stored in `copilot-data` on your host. This is mapped to `/home/bun/.local/share/copilot-proxy` inside the container, ensuring persistence across restarts.
 
 ### Docker with Environment Variables
 
 You can pass the GitHub token directly to the container using environment variables:
 
 ```sh
-# Build with GitHub token
-docker build --build-arg GH_TOKEN=your_github_token_here -t copilot-proxy .
-
 # Run with GitHub token
 docker run -p 127.0.0.1:4399:4399 -e GH_TOKEN=your_github_token_here copilot-proxy start --host 0.0.0.0
 

@@ -127,20 +127,17 @@ docker build -t copilot-proxy .
 mkdir -p ./copilot-data
 
 # 使用挂载目录来保持认证信息，确保容器重启后依旧有效
-docker run -p 127.0.0.1:4399:4399 -v $(pwd)/copilot-data:/root/.local/share/copilot-proxy copilot-proxy start --host 0.0.0.0
+docker run -p 127.0.0.1:4399:4399 -v $(pwd)/copilot-data:/home/bun/.local/share/copilot-proxy copilot-proxy start --host 0.0.0.0
 ```
 
 > **提示：**
-> GitHub token 与相关数据会保存在宿主机的 `copilot-data`，映射到容器内 `/root/.local/share/copilot-proxy`，便于持久化。
+> GitHub token 与相关数据会保存在宿主机的 `copilot-data`，映射到容器内 `/home/bun/.local/share/copilot-proxy`，便于持久化。
 
 ### Docker 环境变量
 
 可以通过环境变量直接传入 GitHub token：
 
 ```sh
-# 构建时注入 GitHub token
-docker build --build-arg GH_TOKEN=your_github_token_here -t copilot-proxy .
-
 # 运行时传入 GitHub token
 docker run -p 127.0.0.1:4399:4399 -e GH_TOKEN=your_github_token_here copilot-proxy start --host 0.0.0.0
 
