@@ -262,6 +262,7 @@ describe('chat-completions error paths', () => {
     expect(body).toContain('"type":"error"')
     expect(body).toContain('"message":"chat stream failed"')
     expect(body).toContain('"code":"stream_error"')
+    expect(body).toContain('data: [DONE]')
   })
 
   test('Claude chat-completions requests keep using /chat/completions despite native Anthropic support', async () => {

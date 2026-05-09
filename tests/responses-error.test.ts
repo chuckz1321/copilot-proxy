@@ -61,6 +61,8 @@ test('/v1/responses official subroutes are forwarded to the Copilot backend', as
       status: 200,
       headers: {
         'Content-Type': 'application/json',
+        'anthropic-ratelimit-requests-limit': '100',
+        'cache-creation-input-tokens': '12',
         'x-request-id': 'req_forwarded',
       },
     })
@@ -111,6 +113,8 @@ test('/v1/responses official subroutes are forwarded to the Copilot backend', as
 
     expect(response.status).toBe(200)
     expect(response.headers.get('x-request-id')).toBe('req_forwarded')
+    expect(response.headers.get('anthropic-ratelimit-requests-limit')).toBe('100')
+    expect(response.headers.get('cache-creation-input-tokens')).toBe('12')
   }
 
   expect(fetchMock.mock.calls.map(call => ({
@@ -194,6 +198,7 @@ test('/v1/responses streaming surfaces upstream stream errors as SSE error event
   expect(body).toContain('"type":"error"')
   expect(body).toContain('"message":"stream failed"')
   expect(body).toContain('"code":"stream_error"')
+  expect(body).toContain('data: [DONE]')
 })
 
 test('/v1/responses translated Anthropic streaming surfaces upstream stream errors as Responses SSE error events', async () => {
@@ -225,6 +230,7 @@ test('/v1/responses translated Anthropic streaming surfaces upstream stream erro
   expect(body).toContain('"type":"error"')
   expect(body).toContain('"message":"anthropic stream failed"')
   expect(body).toContain('"code":"stream_error"')
+  expect(body).toContain('data: [DONE]')
 })
 
 test('/v1/responses rejects external image URLs locally before forwarding upstream', async () => {

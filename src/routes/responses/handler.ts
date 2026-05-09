@@ -85,24 +85,31 @@ export async function handleResponsesPassthrough(
     requestHeaders['Content-Type'] = contentType
   }
 
-  const response = await forwardResponsesEndpoint(`${path}${url.search}`, {
-    method,
-    body,
-    headers: requestHeaders,
-  })
+  let response: Response | undefined
+  try {
+    response = await forwardResponsesEndpoint(`${path}${url.search}`, {
+      method,
+      body,
+      headers: requestHeaders,
+    })
 
-  forwardUpstreamHeaders(c, response.headers)
-  const responseHeaders: Record<string, string> = {}
-  const responseContentType = response.headers.get('content-type')
-  if (responseContentType) {
-    responseHeaders['content-type'] = responseContentType
-  }
-  const requestId = response.headers.get('x-request-id')
-  if (requestId) {
-    responseHeaders['x-request-id'] = requestId
-  }
+    forwardUpstreamHeaders(c, response.headers)
+    const responseHeaders: Record<string, string> = {}
+    const responseContentType = response.headers.get('content-type')
+    if (responseContentType) {
+      responseHeaders['content-type'] = responseContentType
+    }
+    const requestId = response.headers.get('x-request-id')
+    if (requestId) {
+      responseHeaders['x-request-id'] = requestId
+    }
 
-  return c.body(response.body as ReadableStream, response.status as ContentfulStatusCode, responseHeaders)
+    return c.body(response.body as ReadableStream, response.status as ContentfulStatusCode, responseHeaders)
+  }
+  catch (error) {
+    await response?.body?.cancel(error).catch(() => {})
+    throw error
+  }
 }
 
 /** Direct path: model supports responses API */

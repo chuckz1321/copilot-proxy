@@ -35,6 +35,12 @@ export async function writeOpenAIStreamError(
     event: 'error',
     data: JSON.stringify(createOpenAIStreamError(error, options.fallbackMessage)),
   })
+
+  if (!stream.aborted && !stream.closed) {
+    await stream.writeSSE({
+      data: '[DONE]',
+    })
+  }
 }
 
 function createOpenAIStreamError(error: unknown, fallbackMessage: string): OpenAIStreamError {

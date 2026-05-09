@@ -7,6 +7,7 @@ export const usageRoute = new Hono()
 
 usageRoute.get('/', async (c) => {
   try {
+    c.header('Cache-Control', 'no-store')
     const usage = await getCopilotUsage()
     return c.json(usage)
   }
