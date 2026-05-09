@@ -111,6 +111,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
       fetch: server.fetch as ServerHandler,
       port: options.port,
       hostname: options.host,
+      bun: {
+        idleTimeout: 0,
+      },
     })
   }
   catch (error) {
