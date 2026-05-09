@@ -1,3 +1,4 @@
+import process from 'node:process'
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import consola from 'consola'
 
@@ -6,6 +7,8 @@ import { server } from '~/server'
 
 const originalFetch = globalThis.fetch
 const originalPrompt = consola.prompt
+const originalStdinIsTTY = process.stdin.isTTY
+const originalStdoutIsTTY = process.stdout.isTTY
 
 const fetchMock = mock(async (): Promise<Response> => {
   return new Response('{}', {
@@ -68,6 +71,8 @@ afterEach(() => {
   restoreRequestPolicyState(stateSnapshot)
   globalThis.fetch = originalFetch
   consola.prompt = originalPrompt
+  setIsTTY(process.stdin, originalStdinIsTTY)
+  setIsTTY(process.stdout, originalStdoutIsTTY)
 })
 
 async function expectSecondInvalidRequestRateLimited(path: string): Promise<void> {
@@ -95,7 +100,16 @@ function rejectManualApproval(): ReturnType<typeof mock> {
   const promptMock = mock(async () => false)
   consola.prompt = promptMock as unknown as typeof consola.prompt
   state.manualApprove = true
+  setIsTTY(process.stdin, true)
+  setIsTTY(process.stdout, true)
   return promptMock
+}
+
+function setIsTTY(stream: NodeJS.ReadStream | NodeJS.WriteStream, value: boolean | undefined): void {
+  Object.defineProperty(stream, 'isTTY', {
+    configurable: true,
+    value,
+  })
 }
 
 describe('upstream request policy route coverage', () => {

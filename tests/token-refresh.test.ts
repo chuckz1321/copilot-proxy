@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
 import { TOKEN_RETRY_DELAYS } from '~/lib/constants'
 import { state } from '~/lib/state'
-import { refreshTokenWithRetry } from '~/lib/token'
+import { getCopilotTokenRefreshDelayMs, refreshTokenWithRetry } from '~/lib/token'
 
 describe('refreshTokenWithRetry', () => {
   let originalCopilotToken: string | undefined
@@ -94,5 +94,51 @@ describe('refreshTokenWithRetry', () => {
     expect(sleepCalls[1][0]).toBe(TOKEN_RETRY_DELAYS[1])
     expect(sleepCalls[2][0]).toBe(TOKEN_RETRY_DELAYS[2])
     expect(state.copilotToken).toBe('token-before-failures')
+  })
+
+  test('shares an in-flight locked refresh', async () => {
+    let resolveFetch: ((value: {
+      token: string
+      refresh_in: number
+      expires_at: number
+    }) => void) | undefined
+    const fetchToken = mock(() => new Promise<{
+      token: string
+      refresh_in: number
+      expires_at: number
+    }>((resolve) => {
+      resolveFetch = resolve
+    }))
+    const failureState = createFailureState()
+
+    const first = refreshTokenWithRetry({
+      fetchToken,
+      failureState,
+      useLock: true,
+    })
+    const second = refreshTokenWithRetry({
+      fetchToken,
+      failureState,
+      useLock: true,
+    })
+
+    resolveFetch?.({
+      token: 'locked-refresh-token',
+      refresh_in: 1800,
+      expires_at: Date.now() + 1800 * 1000,
+    })
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(fetchToken).toHaveBeenCalledTimes(1)
+    expect(firstResult?.token).toBe('locked-refresh-token')
+    expect(secondResult?.token).toBe('locked-refresh-token')
+    expect(state.copilotToken).toBe('locked-refresh-token')
+  })
+
+  test('clamps token refresh delay and leaves room before expiry', () => {
+    expect(getCopilotTokenRefreshDelayMs(30)).toBe(60_000)
+    expect(getCopilotTokenRefreshDelayMs(3600)).toBe(3_540_000)
+    expect(getCopilotTokenRefreshDelayMs(Number.NaN)).toBe(60_000)
+    expect(getCopilotTokenRefreshDelayMs(48 * 60 * 60)).toBe(24 * 60 * 60 * 1000)
   })
 })

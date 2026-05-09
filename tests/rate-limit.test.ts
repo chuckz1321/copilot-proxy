@@ -73,9 +73,8 @@ describe('checkRateLimit', () => {
     await checkRateLimit(state)
     const elapsed = Date.now() - start
 
-    // Math.ceil(1 - 0.5) = 1 second wait, allow tolerance
-    expect(elapsed).toBeGreaterThanOrEqual(800)
-    expect(elapsed).toBeLessThan(2000)
+    expect(elapsed).toBeGreaterThanOrEqual(400)
+    expect(elapsed).toBeLessThan(1500)
   })
 
   test('timestamp is updated before sleep completes (race guard)', async () => {
@@ -99,5 +98,24 @@ describe('checkRateLimit', () => {
 
     // Let the sleep finish so the test cleans up properly
     await promise
+  })
+
+  test('rateLimitWait mode reserves future slots for concurrent requests', async () => {
+    const state = makeState({
+      rateLimitSeconds: 1,
+      rateLimitWait: true,
+      lastRequestTimestamp: Date.now() - 500,
+    })
+
+    const first = checkRateLimit(state)
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const firstReservedTimestamp = state.lastRequestTimestamp!
+
+    const second = checkRateLimit(state)
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    expect(state.lastRequestTimestamp!).toBeGreaterThan(firstReservedTimestamp)
+
+    await Promise.all([first, second])
   })
 })

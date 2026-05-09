@@ -1,3 +1,4 @@
+import type { GetCopilotTokenResponse } from '~/services/github/get-copilot-token'
 import type { DeviceCodeResponse } from '~/services/github/get-device-code'
 import fs from 'node:fs/promises'
 import consola from 'consola'
@@ -43,16 +44,41 @@ interface RefreshTokenWithRetryDeps {
   fetchToken?: typeof getCopilotToken
   sleepFn?: typeof sleep
   failureState?: RefreshTokenFailureState
+  useLock?: boolean
 }
 
-export async function refreshTokenWithRetry(deps: RefreshTokenWithRetryDeps = {}): Promise<void> {
+let refreshInFlight: Promise<GetCopilotTokenResponse | undefined> | undefined
+
+export async function refreshTokenWithRetry(deps: RefreshTokenWithRetryDeps = {}): Promise<GetCopilotTokenResponse | undefined> {
+  const useLock = deps.useLock ?? (
+    deps.fetchToken === undefined
+    && deps.sleepFn === undefined
+    && deps.failureState === undefined
+  )
+
+  if (useLock) {
+    if (refreshInFlight)
+      return refreshInFlight
+
+    refreshInFlight = refreshTokenWithRetryUnlocked(deps)
+      .finally(() => {
+        refreshInFlight = undefined
+      })
+    return refreshInFlight
+  }
+
+  return refreshTokenWithRetryUnlocked(deps)
+}
+
+async function refreshTokenWithRetryUnlocked(deps: RefreshTokenWithRetryDeps = {}): Promise<GetCopilotTokenResponse | undefined> {
   const fetchToken = deps.fetchToken ?? getCopilotToken
   const sleepFn = deps.sleepFn ?? sleep
   const failureState = deps.failureState ?? refreshTokenFailureState
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const { token } = await fetchToken()
+      const response = await fetchToken()
+      const { token } = response
       state.copilotToken = token
       consola.debug('Copilot token refreshed')
       if (state.showToken) {
@@ -62,7 +88,7 @@ export async function refreshTokenWithRetry(deps: RefreshTokenWithRetryDeps = {}
         consola.info(`Token refresh recovered after ${failureState.consecutiveFailures} consecutive failure(s)`)
       }
       failureState.consecutiveFailures = 0
-      return
+      return response
     }
     catch (error) {
       if (attempt < MAX_RETRIES) {
@@ -79,6 +105,7 @@ export async function refreshTokenWithRetry(deps: RefreshTokenWithRetryDeps = {}
     + ` (${failureState.consecutiveFailures} consecutive interval failure(s)).`
     + ` Service may be using a stale token.`,
   )
+  return undefined
 }
 
 export async function setupCopilotToken() {
@@ -91,16 +118,26 @@ export async function setupCopilotToken() {
     consola.info('Copilot token:', token)
   }
 
-  const rawInterval = (refresh_in - 60) * 1000
+  scheduleCopilotTokenRefresh(refresh_in)
+}
+
+export function getCopilotTokenRefreshDelayMs(refreshInSeconds: number): number {
+  const rawInterval = (refreshInSeconds - 60) * 1000
   // Clamp to [60s, 24h] to prevent timer issues with extreme values
   const MAX_REFRESH_MS = 24 * 60 * 60 * 1000
-  const refreshInterval = Number.isFinite(rawInterval)
+  return Number.isFinite(rawInterval)
     ? Math.min(Math.max(rawInterval, 60_000), MAX_REFRESH_MS)
     : 60_000
-  setInterval(async () => {
+}
+
+function scheduleCopilotTokenRefresh(refreshInSeconds: number): void {
+  const refreshDelay = getCopilotTokenRefreshDelayMs(refreshInSeconds)
+  const timer = setTimeout(async () => {
     consola.debug('Refreshing Copilot token')
-    await refreshTokenWithRetry()
-  }, refreshInterval)
+    const refreshed = await refreshTokenWithRetry()
+    scheduleCopilotTokenRefresh(refreshed?.refresh_in ?? refreshInSeconds)
+  }, refreshDelay)
+  timer.unref?.()
 }
 
 interface SetupGitHubTokenOptions {
@@ -142,7 +179,7 @@ export async function setupGitHubToken(
   }
   catch (error) {
     if (error instanceof HTTPError) {
-      consola.error('Failed to get GitHub token:', await error.response.json())
+      consola.error('Failed to get GitHub token:', await error.json())
       throw error
     }
 
