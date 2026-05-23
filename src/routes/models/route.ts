@@ -4,6 +4,8 @@ import { forwardError } from '~/lib/error'
 import { state } from '~/lib/state'
 import { cacheModels } from '~/lib/utils'
 
+import { createCodexModelsResponseEtag, isCodexModelsRequest, toCodexModelsResponse } from './codex-compat'
+
 export const modelRoutes = new Hono()
 
 modelRoutes.get('/', async (c) => {
@@ -13,7 +15,18 @@ modelRoutes.get('/', async (c) => {
       await cacheModels()
     }
 
-    const models = state.models?.data.map(model => ({
+    const modelsData = state.models?.data ?? []
+
+    const requestUrl = new URL(c.req.url)
+    if (isCodexModelsRequest(requestUrl)) {
+      const codexModelsResponse = await toCodexModelsResponse(modelsData, requestUrl)
+      c.header('Cache-Control', 'private, max-age=300')
+      // Codex stores this value with its on-disk model cache; it does not use HTTP 304 here.
+      c.header('ETag', createCodexModelsResponseEtag(codexModelsResponse))
+      return c.json(codexModelsResponse)
+    }
+
+    const models = modelsData.map(model => ({
       id: model.id,
       object: 'model',
       type: 'model',

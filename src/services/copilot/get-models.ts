@@ -59,6 +59,8 @@ interface ModelSupports {
   tool_calls?: boolean
   parallel_tool_calls?: boolean
   dimensions?: boolean
+  vision?: boolean
+  web_search?: boolean
 }
 
 interface ModelCapabilities {
@@ -77,6 +79,7 @@ export interface Model {
   name: string
   object: string
   preview: boolean
+  supported_endpoints?: Array<string>
   vendor: string
   version: string
   policy?: {
