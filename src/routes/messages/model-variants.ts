@@ -8,10 +8,6 @@ interface ModelVariants {
 const MODEL_VARIANTS: Record<string, ModelVariants> = {
   'claude-opus-4.6': {
     fast: 'claude-opus-4.6-fast',
-    context1m: 'claude-opus-4.6-1m',
-  },
-  'claude-opus-4.7': {
-    context1m: 'claude-opus-4.7-1m-internal',
   },
 }
 

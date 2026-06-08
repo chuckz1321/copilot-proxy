@@ -1912,13 +1912,13 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
   },
   {
     id: 'native-anthropic-reasoning-effort-max',
-    title: 'Native Anthropic output_config.effort=max (expected rejection)',
+    title: 'Native Anthropic output_config.effort=max',
     tier: 'optional',
     endpoint: 'anthropic-messages',
-    expectation: 'must_be_unsupported',
-    candidateFix: 'Keep native passthrough behavior and surface the upstream max-effort rejection unchanged.',
-    candidateMapping: 'Anthropic output_config.effort=max -> Copilot /v1/messages invalid_reasoning_effort',
-    rationale: 'Copilot Anthropic max-effort support is model-dependent; this probe records whether the selected upstream model rejects max cleanly.',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward max on native passthrough when Copilot accepts it; otherwise surface the upstream invalid_reasoning_effort rejection unchanged.',
+    candidateMapping: 'Anthropic output_config.effort=max -> Copilot /v1/messages output_config.effort',
+    rationale: 'Copilot Anthropic max-effort support is model-dependent; max may be accepted or cleanly rejected depending on the selected upstream model.',
     isUnsupported: buildUnsupportedMatcher([
       'output_config.effort',
       'reasoning_effort',

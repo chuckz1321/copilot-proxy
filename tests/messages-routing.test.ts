@@ -365,7 +365,7 @@ describe('messages route upstream adaptation', () => {
     expect(body.model).toBe('claude-opus-4-6-20250514')
   })
 
-  test('Claude Opus 4.7 1m beta routes normalized model to internal 1m upstream model', async () => {
+  test('Claude Opus 4.7 1m beta keeps normalized native 1m upstream model', async () => {
     const res = await server.request('/v1/messages', {
       method: 'POST',
       headers: {
@@ -386,7 +386,7 @@ describe('messages route upstream adaptation', () => {
     expect(url).toBe('https://api.githubcopilot.com/v1/messages')
 
     const forwardedPayload = JSON.parse(String(init?.body)) as { model?: string }
-    expect(forwardedPayload.model).toBe('claude-opus-4.7-1m-internal')
+    expect(forwardedPayload.model).toBe('claude-opus-4.7')
 
     const body = await res.json() as { model?: string }
     expect(body.model).toBe('claude-opus-4-7')
@@ -427,7 +427,7 @@ describe('messages route upstream adaptation', () => {
       model?: string
       tools?: Array<{ name?: string, type?: string, input_schema?: unknown }>
     }
-    expect(forwardedPayload.model).toBe('claude-opus-4.7-1m-internal')
+    expect(forwardedPayload.model).toBe('claude-opus-4.7')
     expect(forwardedPayload.tools).toEqual([
       {
         name: 'noop',
@@ -439,7 +439,7 @@ describe('messages route upstream adaptation', () => {
     expect(headers['anthropic-beta']).toBeUndefined()
   })
 
-  test('Claude Opus 4.7 1m beta forwards xhigh effort to internal 1m upstream model', async () => {
+  test('Claude Opus 4.7 1m beta forwards xhigh effort to native 1m upstream model', async () => {
     const res = await server.request('/v1/messages', {
       method: 'POST',
       headers: {
@@ -462,7 +462,7 @@ describe('messages route upstream adaptation', () => {
       model?: string
       output_config?: { effort?: string }
     }
-    expect(forwardedPayload.model).toBe('claude-opus-4.7-1m-internal')
+    expect(forwardedPayload.model).toBe('claude-opus-4.7')
     expect(forwardedPayload.output_config?.effort).toBe('xhigh')
   })
 

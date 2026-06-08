@@ -836,7 +836,7 @@ describe('translateResponsesRequestToAnthropic', () => {
 
   test('reasoning.effort xhigh is preserved on native Anthropic requests', () => {
     const payload: ResponsesPayload = {
-      model: 'claude-opus-4.7-1m-internal',
+      model: 'claude-opus-4.7',
       input: 'Hi',
       reasoning: { effort: 'xhigh' },
     }

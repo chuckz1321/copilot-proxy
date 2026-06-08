@@ -40,19 +40,24 @@ describe('model variant routing', () => {
     expect(applyModelVariant(payload.model, payload, 'fast-mode-2026-02-01')).toBe('claude-opus-4.6-fast')
   })
 
-  test('1m context via header routes to claude-opus-4.6-1m', () => {
+  test('1m context leaves claude-opus-4.6 on its native 1m model', () => {
     const payload = makePayload('claude-opus-4.6')
-    expect(applyModelVariant(payload.model, payload, 'context-1m-2025-08-07')).toBe('claude-opus-4.6-1m')
+    expect(applyModelVariant(payload.model, payload, 'context-1m-2025-08-07')).toBe('claude-opus-4.6')
   })
 
-  test('1m context routes claude-opus-4.7 to internal model', () => {
+  test('1m context leaves claude-opus-4.7 on its native 1m model', () => {
     const payload = makePayload('claude-opus-4.7')
-    expect(applyModelVariant(payload.model, payload, 'context-1m-2025-08-07')).toBe('claude-opus-4.7-1m-internal')
+    expect(applyModelVariant(payload.model, payload, 'context-1m-2025-08-07')).toBe('claude-opus-4.7')
   })
 
-  test('1m context normalizes claude-opus-4-7 before routing', () => {
+  test('1m context normalizes claude-opus-4-7 without using an internal variant', () => {
     const payload = makePayload('claude-opus-4-7')
-    expect(applyModelVariant(payload.model, payload, 'context-1m-2025-08-07')).toBe('claude-opus-4.7-1m-internal')
+    expect(applyModelVariant(payload.model, payload, 'context-1m-2025-08-07')).toBe('claude-opus-4.7')
+  })
+
+  test('1m context leaves claude-opus-4.8 on its native model', () => {
+    const payload = makePayload('claude-opus-4-8')
+    expect(applyModelVariant(payload.model, payload, 'context-1m-2025-08-07')).toBe('claude-opus-4.8')
   })
 
   test('no special signal only normalizes the model name', () => {
@@ -67,7 +72,7 @@ describe('model variant routing', () => {
 
   test('beta header with claude-code prefix and context-1m together', () => {
     const payload = makePayload('claude-opus-4.6')
-    expect(applyModelVariant(payload.model, payload, 'claude-code-2025-01-01, context-1m-2025-08-07')).toBe('claude-opus-4.6-1m')
+    expect(applyModelVariant(payload.model, payload, 'claude-code-2025-01-01, context-1m-2025-08-07')).toBe('claude-opus-4.6')
   })
 
   test('model with date suffix is normalized before applying variant', () => {
