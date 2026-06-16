@@ -24,6 +24,8 @@ const RESPONSES_INPUT_FILE_REJECTION_MESSAGE
   = 'input_file is only supported when routing this model directly through /responses. Use a model that supports /responses directly, or provide content that can be represented as translated text/image blocks.'
 const RESPONSES_HOSTED_TOOL_REJECTION_MESSAGE
   = 'Hosted Responses tools are only supported when routing this model directly through /responses. Use a Responses-backed model or replace hosted tools with function tools.'
+const ANTHROPIC_SERVER_TOOL_REJECTION_MESSAGE
+  = 'Anthropic server-side tools are only supported when routing this model directly through /v1/messages. Use a Claude model with native /v1/messages support, or replace server-side tools with custom tools that can be translated.'
 
 /**
  * Resolve the upstream backend for a (clientApi, model) pair.
@@ -83,17 +85,17 @@ export function assertResponsesPayloadTranslatable(
 }
 
 /**
- * Anthropic Messages payloads carry no upstream-only features that need to be
- * rejected before translation. The native passthrough handler already
- * sanitizes its own request before forwarding to /v1/messages.
- *
- * Kept as a no-op so the call site shape mirrors `assertResponsesPayloadTranslatable`.
+ * Reject Anthropic Messages payloads carrying native server-side tools that
+ * cannot be represented on the Responses translation path. Direct
+ * /v1/messages routes intentionally leave these fields for upstream to decide.
  */
 export function assertMessagesPayloadTranslatable(
-  _payload: AnthropicMessagesPayload,
-  _onLocalError: (message: string) => never,
+  payload: AnthropicMessagesPayload,
+  onLocalError: (message: string) => never,
 ): void {
-  // intentionally empty
+  if (payloadHasAnthropicServerTools(payload)) {
+    onLocalError(ANTHROPIC_SERVER_TOOL_REJECTION_MESSAGE)
+  }
 }
 
 function peerInTranslatableFamily(clientApi: ClientApi): BackendApiType | undefined {
@@ -142,4 +144,8 @@ function payloadHasInputFileParts(payload: ResponsesPayload): boolean {
   }
 
   return false
+}
+
+function payloadHasAnthropicServerTools(payload: AnthropicMessagesPayload): boolean {
+  return Boolean(payload.tools?.some(tool => 'type' in tool))
 }

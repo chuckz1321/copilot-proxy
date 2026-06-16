@@ -176,7 +176,7 @@ export interface AnthropicSystemMessage {
 
 export type AnthropicMessage = AnthropicUserMessage | AnthropicAssistantMessage | AnthropicSystemMessage
 
-export type AnthropicTool = AnthropicCustomTool | AnthropicAdvisorTool
+export type AnthropicTool = AnthropicCustomTool | AnthropicAdvisorTool | AnthropicServerTool
 
 export interface AnthropicCustomTool {
   name: string
@@ -190,6 +190,12 @@ export interface AnthropicAdvisorTool {
   type: 'advisor_20260301'
   name: string
   model: string
+  cache_control?: AnthropicCacheControl
+}
+
+export interface AnthropicServerTool {
+  type: string
+  name: string
   cache_control?: AnthropicCacheControl
 }
 

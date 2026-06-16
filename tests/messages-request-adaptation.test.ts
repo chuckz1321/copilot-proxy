@@ -31,7 +31,7 @@ describe('sanitizeForCopilotBackend', () => {
     expect('context_management' in payload).toBe(false)
   })
 
-  test('flattens legacy json_schema.schema and strips unsupported format metadata', () => {
+  test('flattens legacy json_schema.schema while preserving client format metadata', () => {
     const schema = { type: 'object', properties: { ok: { type: 'boolean' } } }
     const payload = makePayload({
       output_config: {
@@ -48,6 +48,8 @@ describe('sanitizeForCopilotBackend', () => {
 
     expect(payload.output_config?.format).toEqual({
       type: 'json_schema',
+      name: 'response_shape',
+      strict: true,
       schema,
     })
   })

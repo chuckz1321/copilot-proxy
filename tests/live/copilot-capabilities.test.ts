@@ -6,6 +6,7 @@ import type {
   CapabilityProbeExpectation,
   LiveCopilotProbeConfig,
   ProbeErrorDetails,
+  RawAnthropicCapabilityProbe,
 } from './copilot-capability-matrix'
 import type { AnthropicResponse } from '~/lib/translation/types'
 
@@ -58,18 +59,20 @@ const runLiveTest = LIVE_TEST_ENABLED ? test : test.skip
 runLiveTest(
   'runs the GitHub Copilot upstream capability probe matrix',
   async () => {
-    const config = getLiveEnvConfig()
-    const probes = getEnabledLiveProbes(config)
+    const configs = getLiveEnvConfigs()
     const outcomes: Array<ProbeOutcome> = []
     const failures: Array<string> = []
 
     try {
-      for (const probe of probes) {
-        const outcome = await runProbeWithRetries(probe, config)
-        outcomes.push(outcome)
+      for (const config of configs) {
+        const probes = getEnabledLiveProbes(config)
+        for (const probe of probes) {
+          const outcome = await runProbeWithRetries(probe, config)
+          outcomes.push(outcome)
 
-        if (!isAcceptableOutcome(probe.expectation, outcome.status)) {
-          failures.push(formatFailure(probe, outcome))
+          if (!isAcceptableOutcome(probe.expectation, outcome.status)) {
+            failures.push(formatFailure(probe, outcome))
+          }
         }
       }
     }
@@ -103,7 +106,9 @@ function getEnabledLiveProbes(config: LiveEnvConfig): Array<CapabilityProbe> {
     }
 
     return copilotCapabilityProbes.filter(probe =>
-      probe.endpoint === 'anthropic-messages' || probe.endpoint === 'anthropic-files',
+      probe.endpoint === 'anthropic-messages'
+      || probe.endpoint === 'anthropic-raw'
+      || probe.endpoint === 'anthropic-files',
     )
   }
 
@@ -149,27 +154,28 @@ function isRetryableProbeOutcome(outcome: ProbeOutcome): boolean {
     && outcome.httpStatus >= 500
 }
 
-function getLiveEnvConfig(): LiveEnvConfig {
+function getLiveEnvConfigs(): Array<LiveEnvConfig> {
   const token = process.env.COPILOT_TOKEN
   if (!token) {
     throw new Error('COPILOT_TOKEN is required when COPILOT_LIVE_TEST=1')
   }
-  const claudeModel = process.env.COPILOT_LIVE_CLAUDE_MODEL
+  const claudeModels = parseClaudeModels()
   const responsesModel = process.env.COPILOT_LIVE_RESPONSES_MODEL
 
-  if (!LIVE_RESPONSES_ONLY && !claudeModel) {
-    throw new Error('COPILOT_LIVE_CLAUDE_MODEL is required when Claude live probes are enabled')
+  if (!LIVE_RESPONSES_ONLY && claudeModels.length === 0) {
+    throw new Error('COPILOT_LIVE_CLAUDE_MODEL or COPILOT_LIVE_CLAUDE_MODELS is required when Claude live probes are enabled')
   }
 
   if (!LIVE_ANTHROPIC_ONLY && !responsesModel) {
     throw new Error('COPILOT_LIVE_RESPONSES_MODEL is required when Responses live probes are enabled')
   }
 
-  return {
+  const effectiveClaudeModels = LIVE_RESPONSES_ONLY ? [''] : claudeModels
+  return effectiveClaudeModels.map(claudeModel => ({
     token,
     accountType: process.env.COPILOT_ACCOUNT_TYPE ?? 'individual',
     vsCodeVersion: process.env.COPILOT_VSCODE_VERSION ?? '1.104.3',
-    claudeModel: claudeModel ?? '',
+    claudeModel,
     responsesModel: responsesModel ?? '',
     imageUrl:
       process.env.COPILOT_LIVE_IMAGE_URL
@@ -177,7 +183,18 @@ function getLiveEnvConfig(): LiveEnvConfig {
     fileUrl:
       process.env.COPILOT_LIVE_FILE_URL
       ?? 'https://www.berkshirehathaway.com/letters/2024ltr.pdf',
-  }
+  }))
+}
+
+function parseClaudeModels(): Array<string> {
+  const rawModels = process.env.COPILOT_LIVE_CLAUDE_MODELS
+    ?? process.env.COPILOT_LIVE_CLAUDE_MODEL
+    ?? ''
+
+  return rawModels
+    .split(',')
+    .map(model => model.trim())
+    .filter(Boolean)
 }
 
 async function runProbe(
@@ -259,6 +276,65 @@ async function runProbe(
         error,
         probe,
         model: payload.model,
+        durationMs: Date.now() - startedAt,
+      })
+    }
+  }
+
+  if (probe.endpoint === 'anthropic-raw') {
+    const request = (probe as RawAnthropicCapabilityProbe).buildRequest(config)
+
+    try {
+      const result = await withLiveCopilotState(config, async () => {
+        const headers: Record<string, string> = {
+          ...copilotHeaders(state),
+          'X-Initiator': 'user',
+          ...(request.body ? { 'Content-Type': 'application/json' } : {}),
+          ...(request.headers || {}),
+        }
+        const response = await fetch(`${copilotBaseUrl(state)}${request.path}`, {
+          method: request.method,
+          headers,
+          ...(request.body ? { body: JSON.stringify(request.body) } : {}),
+        })
+        return { response, bodyText: await response.text() }
+      })
+
+      if (!result.response.ok) {
+        throw new HTTPError('Failed to run raw Anthropic probe', new Response(result.bodyText, {
+          status: result.response.status,
+          statusText: result.response.statusText,
+          headers: result.response.headers,
+        }))
+      }
+
+      const expectedBody = request.expectedBody ?? 'any'
+      if (!isExpectedRawAnthropicBody(result.bodyText, expectedBody)) {
+        return {
+          id: probe.id,
+          endpoint: probe.endpoint,
+          title: probe.title,
+          status: 'unexpected_response',
+          model: request.model ?? config.claudeModel,
+          durationMs: Date.now() - startedAt,
+          message: `Expected ${expectedBody} body from ${request.method} ${request.path}`,
+        }
+      }
+
+      return {
+        id: probe.id,
+        endpoint: probe.endpoint,
+        title: probe.title,
+        status: 'supported',
+        model: request.model ?? config.claudeModel,
+        durationMs: Date.now() - startedAt,
+      }
+    }
+    catch (error) {
+      return classifyProbeError({
+        error,
+        probe,
+        model: request.model ?? config.claudeModel,
         durationMs: Date.now() - startedAt,
       })
     }
@@ -449,6 +525,34 @@ function isExpectedRawResponsesBody(
 
   return parsed.object === 'response.input_tokens'
     && typeof parsed.input_tokens === 'number'
+}
+
+function isExpectedRawAnthropicBody(
+  bodyText: string,
+  expectedBody: 'any' | 'message_stream' | 'input_tokens' | 'list',
+): boolean {
+  if (expectedBody === 'any') {
+    return true
+  }
+
+  if (expectedBody === 'message_stream') {
+    return bodyText.includes('event: message_start')
+      && bodyText.includes('event: message_stop')
+  }
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(bodyText) as Record<string, unknown>
+  }
+  catch {
+    return false
+  }
+
+  if (expectedBody === 'input_tokens') {
+    return typeof parsed.input_tokens === 'number'
+  }
+
+  return Array.isArray(parsed.data)
 }
 
 async function withLiveCopilotState<T>(

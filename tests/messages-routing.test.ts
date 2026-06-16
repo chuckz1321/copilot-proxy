@@ -232,6 +232,8 @@ describe('messages route upstream adaptation', () => {
     expect(forwardedPayload.output_config).toEqual({
       format: {
         type: 'json_schema',
+        name: 'sample',
+        strict: true,
         schema: {
           type: 'object',
           properties: { answer: { type: 'string' } },

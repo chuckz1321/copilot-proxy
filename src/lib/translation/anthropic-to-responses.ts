@@ -302,10 +302,10 @@ function translateAnthropicToolsToResponses(
     return undefined
 
   const compatibleTools = tools.filter((tool, index): tool is AnthropicCustomTool => {
-    if ('type' in tool && tool.type === 'advisor_20260301') {
+    if ('type' in tool) {
       logIgnoredAnthropicParameter(
         `tools[${index}]`,
-        'The Anthropic advisor tool is not supported by Copilot and is omitted.',
+        'Anthropic server-side tools cannot be represented on the Copilot Responses wire format and are omitted.',
       )
       return false
     }

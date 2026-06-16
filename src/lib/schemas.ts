@@ -154,9 +154,16 @@ const AnthropicAdvisorToolSchema = z.object({
   cache_control: AnthropicCacheControlSchema.optional(),
 }).passthrough()
 
+const AnthropicServerToolSchema = z.object({
+  type: z.string(),
+  name: z.string(),
+  cache_control: AnthropicCacheControlSchema.optional(),
+}).passthrough()
+
 const AnthropicToolSchema = z.union([
   AnthropicCustomToolSchema,
   AnthropicAdvisorToolSchema,
+  AnthropicServerToolSchema,
 ])
 
 const AnthropicToolChoiceSchema = z.discriminatedUnion('type', [

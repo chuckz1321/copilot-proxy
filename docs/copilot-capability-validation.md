@@ -61,7 +61,7 @@ Hosted tool presence probes set `tool_choice=none`, so they measure whether Copi
 | Responses tools and structured output | `responses-max-tool-calls-1`, `responses-function-call-output-input`, `responses-parallel-tool-calls-false`, `responses-tool-choice-function-object`, `responses-tool-choice-allowed-tools`, `responses-web-search-tool`, `responses-web-search-preview-tool`, `responses-file-search-tool`, `responses-image-generation-tool`, `responses-mcp-tool`, `responses-computer-use-preview-tool`, `responses-tool-search-tool`, `responses-local-shell-tool`, `responses-shell-tool`, `responses-custom-tool`, `responses-namespace-tool`, `responses-apply-patch-tool`, `responses-code-interpreter-tool-unsupported`, `responses-text-format-json-object`, `responses-text-format-json-schema` | `/responses` | env configured | Read the live summary for the selected model and date |
 | Responses multimodal and files | `responses-input-image-url`, `responses-input-image-data-url`, `responses-input-file-url` | `/responses` | env configured | Read the live summary for the selected model and date |
 | Official Responses subroutes | `responses-get-by-id-unsupported`, `responses-delete-by-id-unsupported`, `responses-cancel-unsupported`, `responses-input-items-unsupported`, `responses-input-tokens-unsupported`, `responses-compact-unsupported` | `/responses/{id}`, `/responses/{id}/cancel`, `/responses/{id}/input_items`, `/responses/input_tokens`, `/responses/compact` | env configured | Read the live summary for the selected model and date |
-| Native Anthropic passthrough | `native-anthropic-baseline`, `native-anthropic-reasoning-effort-high`, `native-anthropic-reasoning-effort-xhigh`, `native-anthropic-reasoning-effort-max`, `native-anthropic-json-schema`, `native-anthropic-thinking-display-omitted`, `native-anthropic-document-text`, `native-anthropic-document-url-pdf`, `native-anthropic-document-citations`, `native-anthropic-cache-control`, `native-anthropic-image-base64`, `native-anthropic-image-url-rejected`, `native-anthropic-files-api-unsupported` | `/v1/messages`, `/v1/files` | env configured | Read the live summary for the selected model and date |
+| Native Anthropic passthrough | `native-anthropic-baseline`, `native-anthropic-hyphen-alias-baseline`, `native-anthropic-streaming`, `native-anthropic-count-tokens`, `native-anthropic-count-tokens-tools`, `native-anthropic-reasoning-effort-low`, `native-anthropic-reasoning-effort-medium`, `native-anthropic-reasoning-effort-high`, `native-anthropic-reasoning-effort-xhigh`, `native-anthropic-reasoning-effort-max`, `native-anthropic-json-schema`, `native-anthropic-thinking-display-omitted`, `native-anthropic-manual-thinking-budget`, `native-anthropic-thinking-disabled`, `native-anthropic-tool-choice-specific`, `native-anthropic-tool-choice-any-disable-parallel`, `native-anthropic-strict-custom-tool`, `native-anthropic-server-tool-code-execution`, `native-anthropic-server-tool-memory`, `native-anthropic-server-tool-bash`, `native-anthropic-server-tool-text-editor`, `native-anthropic-server-tool-web-search`, `native-anthropic-mid-conversation-system-beta`, `native-anthropic-speed-fast`, `native-anthropic-document-text`, `native-anthropic-document-url-pdf`, `native-anthropic-document-file-unsupported`, `native-anthropic-document-citations`, `native-anthropic-cache-control`, `native-anthropic-image-base64`, `native-anthropic-image-url-rejected`, `native-anthropic-models-api-unsupported`, `native-anthropic-batches-list-unsupported`, `native-anthropic-batches-create-unsupported`, `native-anthropic-files-api-unsupported` | `/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`, `/v1/messages/batches`, `/v1/files` | env configured | Read the live summary for the selected model and date |
 
 ## How to run the live probes
 
@@ -72,6 +72,7 @@ Required environment variables:
 - `COPILOT_LIVE_TEST=1`
 - `COPILOT_TOKEN=<your GitHub Copilot bearer token>`
 - `COPILOT_LIVE_CLAUDE_MODEL=<claude-model-under-test>` when Claude or Anthropic probes are enabled
+- `COPILOT_LIVE_CLAUDE_MODELS=<comma-separated-claude-models-under-test>` as an alternative to run the Claude/Anthropic probes for multiple models in one suite
 - `COPILOT_LIVE_RESPONSES_MODEL=<responses-model-under-test>` when Responses probes are enabled
 
 Optional environment variables:
@@ -111,6 +112,16 @@ Anthropic-only baseline:
 COPILOT_LIVE_TEST=1 \
 COPILOT_TOKEN=ghu_xxx \
 COPILOT_LIVE_CLAUDE_MODEL=<claude-model-under-test> \
+COPILOT_LIVE_ANTHROPIC_ONLY=1 \
+bun run test:live:copilot
+```
+
+Anthropic-only probes across current Opus variants:
+
+```sh
+COPILOT_LIVE_TEST=1 \
+COPILOT_TOKEN=ghu_xxx \
+COPILOT_LIVE_CLAUDE_MODELS=claude-opus-4.8,claude-opus-4.7,claude-opus-4.6 \
 COPILOT_LIVE_ANTHROPIC_ONLY=1 \
 bun run test:live:copilot
 ```
@@ -248,6 +259,35 @@ claude --bare -p \
 ```
 
 This verifies a real tool_use/tool_result loop through `/v1/messages`.
+
+For changes that affect Claude Code request adaptation, native `/v1/messages`
+passthrough, tool schemas, thinking/output_config handling, or local tool loops,
+run the fuller Claude Code smoke matrix across the current Opus variants instead
+of only checking one basic prompt. At minimum, cover each model with:
+
+- a no-tool basic prompt that must return a fixed string
+- a `Read`-only local file read from `package.json`
+- `--json-schema` structured output and validation of the `structured_output`
+  object in Claude Code's JSON result
+- an isolated temporary-directory `Read,Write,Edit` tool chain that creates,
+  edits, reads back, and externally verifies a file
+- `--effort max` with a fixed-string response
+
+Use temporary `HOME` and temporary work directories for every run. Do not modify
+the user's `~/.claude` state or repository files while running this matrix.
+
+```sh
+CLAUDE_MODELS_UNDER_TEST="claude-opus-4.8 claude-opus-4.7 claude-opus-4.6"
+for CLAUDE_MODEL_UNDER_TEST in $CLAUDE_MODELS_UNDER_TEST; do
+  # 1. Basic no-tool fixed response
+  # 2. Read-only package.json tool loop
+  # 3. --json-schema structured_output validation
+  # 4. Temporary Read/Write/Edit file lifecycle
+  # 5. --effort max fixed response
+  # Keep each HOME and writable work directory under /tmp.
+  :
+done
+```
 
 ```sh
 CLAUDE_MODEL_UNDER_TEST=<claude-model-under-test>

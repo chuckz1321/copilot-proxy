@@ -16,7 +16,7 @@ export interface ProbeErrorDetails {
   rawBody?: string
 }
 
-export type CapabilityProbeEndpoint = 'chat-completions' | 'responses' | 'responses-raw' | 'anthropic-messages' | 'anthropic-files'
+export type CapabilityProbeEndpoint = 'chat-completions' | 'responses' | 'responses-raw' | 'anthropic-messages' | 'anthropic-raw' | 'anthropic-files'
 export type CapabilityProbeTier = 'baseline' | 'optional'
 export type CapabilityProbeExpectation
   = | 'must_support'
@@ -63,12 +63,26 @@ export interface AnthropicMessagesCapabilityProbe extends CapabilityProbeBase {
   buildPayload: (config: LiveCopilotProbeConfig) => AnthropicMessagesPayload
 }
 
+export interface RawAnthropicProbeRequest {
+  method: 'GET' | 'POST' | 'DELETE'
+  path: string
+  body?: Record<string, unknown>
+  headers?: Record<string, string>
+  expectedBody?: 'any' | 'message_stream' | 'input_tokens' | 'list'
+  model?: string
+}
+
+export interface RawAnthropicCapabilityProbe extends CapabilityProbeBase {
+  endpoint: 'anthropic-raw'
+  buildRequest: (config: LiveCopilotProbeConfig) => RawAnthropicProbeRequest
+}
+
 export interface AnthropicFilesCapabilityProbe extends CapabilityProbeBase {
   endpoint: 'anthropic-files'
   buildPayload: (config: LiveCopilotProbeConfig) => { headers?: Record<string, string> }
 }
 
-export type CapabilityProbe = ChatCompletionsCapabilityProbe | ResponsesCapabilityProbe | RawResponsesCapabilityProbe | AnthropicMessagesCapabilityProbe | AnthropicFilesCapabilityProbe
+export type CapabilityProbe = ChatCompletionsCapabilityProbe | ResponsesCapabilityProbe | RawResponsesCapabilityProbe | AnthropicMessagesCapabilityProbe | RawAnthropicCapabilityProbe | AnthropicFilesCapabilityProbe
 
 interface ResponsesReasoningProbePayload extends Omit<ResponsesPayload, 'reasoning'> {
   reasoning?: {
@@ -161,6 +175,18 @@ function buildBasicResponsesPayload(config: LiveCopilotProbeConfig): ResponsesPa
     input: 'Reply with the single word OK.',
     max_output_tokens: 16,
   }
+}
+
+function buildAnthropicBasicPayload(config: LiveCopilotProbeConfig, model = config.claudeModel): AnthropicMessagesPayload {
+  return {
+    model,
+    max_tokens: 32,
+    messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
+  }
+}
+
+function toAnthropicHyphenAlias(model: string): string {
+  return model.replace(/-(\d)\.(\d)$/, '-$1-$2')
 }
 
 function buildNoopResponsesToolPayload(config: LiveCopilotProbeConfig): ResponsesPayload {
@@ -1865,6 +1891,125 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
     }),
   },
   {
+    id: 'native-anthropic-hyphen-alias-baseline',
+    title: 'Native Anthropic official hyphen model alias',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward official Anthropic model aliases when Copilot accepts them; otherwise keep local normalization.',
+    candidateMapping: 'claude-opus-4-8 style alias -> Copilot /v1/messages',
+    rationale: 'Current Anthropic SDK examples use hyphen aliases, while Copilot historically used dotted aliases.',
+    isUnsupported: buildUnsupportedMatcher([
+      'model',
+      'not found',
+      'unsupported',
+    ]),
+    buildPayload: config => buildAnthropicBasicPayload(config, toAnthropicHyphenAlias(config.claudeModel)),
+  },
+  {
+    id: 'native-anthropic-streaming',
+    title: 'Native Anthropic streaming SSE',
+    tier: 'baseline',
+    endpoint: 'anthropic-raw',
+    expectation: 'must_support',
+    candidateFix: 'Keep Claude Code streaming requests on native /v1/messages.',
+    candidateMapping: 'Anthropic stream=true -> Copilot /v1/messages SSE',
+    rationale: 'Claude Code normally streams /v1/messages and expects Anthropic SSE lifecycle events.',
+    buildRequest: config => ({
+      method: 'POST',
+      path: '/v1/messages',
+      body: {
+        ...buildAnthropicBasicPayload(config),
+        stream: true,
+      },
+      expectedBody: 'message_stream',
+      model: config.claudeModel,
+    }),
+  },
+  {
+    id: 'native-anthropic-count-tokens',
+    title: 'Native Anthropic count_tokens',
+    tier: 'baseline',
+    endpoint: 'anthropic-raw',
+    expectation: 'must_support',
+    candidateFix: 'Use native /v1/messages/count_tokens for Claude token counting.',
+    candidateMapping: 'Anthropic count_tokens -> Copilot /v1/messages/count_tokens',
+    rationale: 'Claude Code and Anthropic SDK clients need model-specific token counts.',
+    buildRequest: config => ({
+      method: 'POST',
+      path: '/v1/messages/count_tokens',
+      body: {
+        model: config.claudeModel,
+        messages: [{ role: 'user', content: 'Count this short prompt.' }],
+      },
+      expectedBody: 'input_tokens',
+      model: config.claudeModel,
+    }),
+  },
+  {
+    id: 'native-anthropic-count-tokens-tools',
+    title: 'Native Anthropic count_tokens with tools',
+    tier: 'optional',
+    endpoint: 'anthropic-raw',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward tool schemas to count_tokens when Copilot accepts them.',
+    candidateMapping: 'Anthropic count_tokens tools -> Copilot /v1/messages/count_tokens tools',
+    rationale: 'Claude clients often include tools in token-count estimates.',
+    isUnsupported: buildUnsupportedMatcher([
+      'tools',
+      'tool',
+    ]),
+    buildRequest: config => ({
+      method: 'POST',
+      path: '/v1/messages/count_tokens',
+      body: {
+        model: config.claudeModel,
+        tools: [{ name: 'noop', description: 'No-op', input_schema: { ...NOOP_TOOL_SCHEMA } }],
+        messages: [{ role: 'user', content: 'Count this tool prompt.' }],
+      },
+      expectedBody: 'input_tokens',
+      model: config.claudeModel,
+    }),
+  },
+  {
+    id: 'native-anthropic-reasoning-effort-low',
+    title: 'Native Anthropic output_config.effort=low',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward low effort on native passthrough when Copilot accepts it.',
+    candidateMapping: 'Anthropic output_config.effort=low -> Copilot /v1/messages output_config.effort',
+    rationale: 'Low effort is used by clients trying to reduce latency and cost.',
+    isUnsupported: buildUnsupportedMatcher([
+      'output_config.effort',
+      'reasoning_effort',
+      'low',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      output_config: { effort: 'low' },
+    }),
+  },
+  {
+    id: 'native-anthropic-reasoning-effort-medium',
+    title: 'Native Anthropic output_config.effort=medium',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward medium effort on native passthrough when Copilot accepts it.',
+    candidateMapping: 'Anthropic output_config.effort=medium -> Copilot /v1/messages output_config.effort',
+    rationale: 'Medium effort is a common balanced setting.',
+    isUnsupported: buildUnsupportedMatcher([
+      'output_config.effort',
+      'reasoning_effort',
+      'medium',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      output_config: { effort: 'medium' },
+    }),
+  },
+  {
     id: 'native-anthropic-reasoning-effort-high',
     title: 'Native Anthropic output_config.effort=high',
     tier: 'optional',
@@ -1986,6 +2131,266 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
     }),
   },
   {
+    id: 'native-anthropic-manual-thinking-budget',
+    title: 'Native Anthropic manual thinking budget',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward legacy thinking.type=enabled only when Copilot accepts it for the selected model.',
+    candidateMapping: 'Anthropic thinking.type=enabled -> Copilot /v1/messages thinking',
+    rationale: 'Opus 4.6 and older-compatible clients may still emit budget_tokens; newer Opus models reject it.',
+    isUnsupported: buildUnsupportedMatcher([
+      'thinking.type.enabled',
+      'thinking',
+      'budget_tokens',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      max_tokens: 2048,
+      thinking: { type: 'enabled', budget_tokens: 1024 },
+      messages: [{ role: 'user', content: 'What is 11 + 31? Answer briefly.' }],
+    }),
+  },
+  {
+    id: 'native-anthropic-thinking-disabled',
+    title: 'Native Anthropic thinking disabled',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward thinking.type=disabled only when Copilot accepts it for the selected model.',
+    candidateMapping: 'Anthropic thinking.type=disabled -> Copilot /v1/messages thinking',
+    rationale: 'Some Claude clients explicitly disable thinking instead of omitting the field.',
+    isUnsupported: buildUnsupportedMatcher([
+      'thinking',
+      'disabled',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      thinking: { type: 'disabled' },
+    }),
+  },
+  {
+    id: 'native-anthropic-tool-choice-specific',
+    title: 'Native Anthropic tool_choice specific tool',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward native Anthropic tool_choice on Claude-routed models when Copilot accepts it.',
+    candidateMapping: 'Anthropic tool_choice.tool -> Copilot /v1/messages tool_choice',
+    rationale: 'Claude Code and SDK clients can constrain tool use through Anthropic tool_choice.',
+    isUnsupported: buildUnsupportedMatcher([
+      'tool_choice',
+      'tool',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      max_tokens: 128,
+      tools: [{ name: 'noop', description: 'No-op', input_schema: { ...NOOP_TOOL_SCHEMA } }],
+      tool_choice: { type: 'tool', name: 'noop' },
+      messages: [{ role: 'user', content: 'Call noop exactly once.' }],
+    }),
+  },
+  {
+    id: 'native-anthropic-tool-choice-any-disable-parallel',
+    title: 'Native Anthropic tool_choice any with disable_parallel_tool_use',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward native disable_parallel_tool_use on Claude-routed models when Copilot accepts it.',
+    candidateMapping: 'Anthropic tool_choice.disable_parallel_tool_use -> Copilot /v1/messages',
+    rationale: 'Parallel tool control is part of Anthropic tool semantics and differs by model/backend.',
+    isUnsupported: buildUnsupportedMatcher([
+      'disable_parallel_tool_use',
+      'parallel',
+      'tool_choice',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      max_tokens: 128,
+      tools: [{ name: 'noop', description: 'No-op', input_schema: { ...NOOP_TOOL_SCHEMA } }],
+      tool_choice: { type: 'any', disable_parallel_tool_use: true },
+      messages: [{ role: 'user', content: 'Call one tool.' }],
+    }),
+  },
+  {
+    id: 'native-anthropic-strict-custom-tool',
+    title: 'Native Anthropic strict custom tool schema',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Preserve strict custom tools when Copilot accepts structured-output enforcement for the selected model.',
+    candidateMapping: 'Anthropic strict custom tool -> Copilot /v1/messages tool schema',
+    rationale: 'Strict tools are model/policy-dependent and should not be inferred from non-strict tool support.',
+    isUnsupported: buildUnsupportedMatcher([
+      'strict',
+      'structured_outputs',
+      'tool',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      max_tokens: 128,
+      tools: [{ name: 'strict_noop', description: 'No-op', strict: true, input_schema: { ...NOOP_TOOL_SCHEMA } }],
+      tool_choice: { type: 'tool', name: 'strict_noop' },
+      messages: [{ role: 'user', content: 'Call strict_noop exactly once.' }],
+    }),
+  },
+  {
+    id: 'native-anthropic-server-tool-code-execution',
+    title: 'Native Anthropic code_execution server tool schema',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Allow Anthropic code_execution tools through native passthrough only when Copilot accepts the schema.',
+    candidateMapping: 'Anthropic code_execution_20260120 -> Copilot /v1/messages tools',
+    rationale: 'Server-side tool schemas vary by Claude model and backend policy.',
+    isUnsupported: buildUnsupportedMatcher([
+      'code_execution_20260120',
+      'code_execution',
+      'tools.0',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      tools: [{ type: 'code_execution_20260120', name: 'code_execution' }],
+      messages: [{ role: 'user', content: 'Reply OK without using tools.' }],
+    }),
+  },
+  {
+    id: 'native-anthropic-server-tool-memory',
+    title: 'Native Anthropic memory server tool schema',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Allow Anthropic memory tools through native passthrough only when Copilot accepts the schema.',
+    candidateMapping: 'Anthropic memory_20250818 -> Copilot /v1/messages tools',
+    rationale: 'Memory is a Claude server-side tool schema used by newer SDKs.',
+    isUnsupported: buildUnsupportedMatcher([
+      'memory_20250818',
+      'memory',
+      'tools.0',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      tools: [{ type: 'memory_20250818', name: 'memory' }],
+      messages: [{ role: 'user', content: 'Reply OK without using tools.' }],
+    }),
+  },
+  {
+    id: 'native-anthropic-server-tool-bash',
+    title: 'Native Anthropic bash server tool schema',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Allow Anthropic bash tools through native passthrough only when Copilot accepts the schema.',
+    candidateMapping: 'Anthropic bash_20250124 -> Copilot /v1/messages tools',
+    rationale: 'Claude Code-style local tool loops rely on client tools, but server-side bash schema support still affects SDK compatibility.',
+    isUnsupported: buildUnsupportedMatcher([
+      'bash_20250124',
+      'bash',
+      'tools.0',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      tools: [{ type: 'bash_20250124', name: 'bash' }],
+      messages: [{ role: 'user', content: 'Reply OK without using tools.' }],
+    }),
+  },
+  {
+    id: 'native-anthropic-server-tool-text-editor',
+    title: 'Native Anthropic text editor server tool schema',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Allow Anthropic text editor tools through native passthrough only when Copilot accepts the schema.',
+    candidateMapping: 'Anthropic text_editor_20250728 -> Copilot /v1/messages tools',
+    rationale: 'Claude Code-compatible edit tools have versioned Anthropic schema names.',
+    isUnsupported: buildUnsupportedMatcher([
+      'text_editor_20250728',
+      'text_editor',
+      'tools.0',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      tools: [{ type: 'text_editor_20250728', name: 'str_replace_based_edit_tool' }],
+      messages: [{ role: 'user', content: 'Reply OK without using tools.' }],
+    }),
+  },
+  {
+    id: 'native-anthropic-server-tool-web-search',
+    title: 'Native Anthropic web_search server tool schema',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Do not add a local rejection if Copilot accepts web_search for any selected Claude model.',
+    candidateMapping: 'Anthropic web_search_20260209 -> Copilot /v1/messages tools',
+    rationale: 'Web search is a documented Anthropic server-side tool but may be unavailable through Copilot.',
+    isUnsupported: buildUnsupportedMatcher([
+      'web_search_20260209',
+      'web search',
+      'web_search',
+    ]),
+    buildPayload: config => ({
+      ...buildAnthropicBasicPayload(config),
+      tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+      messages: [{ role: 'user', content: 'Reply OK without using tools.' }],
+    }),
+  },
+  {
+    id: 'native-anthropic-mid-conversation-system-beta',
+    title: 'Native Anthropic mid-conversation system beta',
+    tier: 'optional',
+    endpoint: 'anthropic-raw',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward mid-conversation system messages when the selected Claude model and beta header accept them.',
+    candidateMapping: 'Anthropic role=system in messages + beta -> Copilot /v1/messages',
+    rationale: 'Newer Anthropic SDKs can emit system messages inside the message array under a model-gated beta.',
+    isUnsupported: buildUnsupportedMatcher([
+      'mid-conversation-system',
+      'system',
+      'anthropic-beta',
+    ]),
+    buildRequest: config => ({
+      method: 'POST',
+      path: '/v1/messages',
+      headers: { 'anthropic-beta': 'mid-conversation-system-2026-04-07' },
+      body: {
+        model: config.claudeModel,
+        max_tokens: 32,
+        messages: [
+          { role: 'user', content: 'Say any one word.' },
+          { role: 'system', content: 'Answer OK only.' },
+        ],
+      },
+      expectedBody: 'any',
+      model: config.claudeModel,
+    }),
+  },
+  {
+    id: 'native-anthropic-speed-fast',
+    title: 'Native Anthropic speed=fast',
+    tier: 'optional',
+    endpoint: 'anthropic-raw',
+    expectation: 'support_or_clean_unsupported',
+    candidateFix: 'Forward speed hints when Copilot accepts them for the selected Claude model.',
+    candidateMapping: 'Anthropic speed=fast + beta -> Copilot /v1/messages',
+    rationale: 'Claude Code can emit latency-oriented speed hints.',
+    isUnsupported: buildUnsupportedMatcher([
+      'speed',
+      'fast',
+      'anthropic-beta',
+    ]),
+    buildRequest: config => ({
+      method: 'POST',
+      path: '/v1/messages',
+      headers: { 'anthropic-beta': 'fast-mode-2026-02-01' },
+      body: {
+        ...buildAnthropicBasicPayload(config),
+        speed: 'fast',
+      },
+      expectedBody: 'any',
+      model: config.claudeModel,
+    }),
+  },
+  {
     id: 'native-anthropic-document-text',
     title: 'Native Anthropic document source=data',
     tier: 'optional',
@@ -2029,6 +2434,33 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
         content: [
           { type: 'document', source: { type: 'url', url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' } },
           { type: 'text', text: 'Is there text in this PDF?' },
+        ],
+      }],
+    }),
+  },
+  {
+    id: 'native-anthropic-document-file-unsupported',
+    title: 'Native Anthropic document source=file is unsupported without Files API',
+    tier: 'optional',
+    endpoint: 'anthropic-messages',
+    expectation: 'must_be_unsupported',
+    candidateFix: 'Do not claim document.source=file support unless the proxy implements real file-id content semantics or Copilot exposes Files API.',
+    candidateMapping: 'Anthropic document source=file -> Copilot /v1/messages document source=file',
+    rationale: 'A successful Files API shim without model-readable file contents would create a false success.',
+    isUnsupported: buildUnsupportedMatcher([
+      'file',
+      'files api',
+      'source.type',
+      'document',
+    ]),
+    buildPayload: config => ({
+      model: config.claudeModel,
+      max_tokens: 64,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'document', source: { type: 'file', file_id: 'file_live_probe_missing' } },
+          { type: 'text', text: 'What is in this file?' },
         ],
       }],
     }),
@@ -2123,6 +2555,67 @@ export const copilotCapabilityProbes: Array<CapabilityProbe> = [
           { type: 'text', text: 'What is this?' },
         ],
       }],
+    }),
+  },
+  {
+    id: 'native-anthropic-models-api-unsupported',
+    title: 'Anthropic Models API is not exposed by Copilot',
+    tier: 'optional',
+    endpoint: 'anthropic-raw',
+    expectation: 'must_be_unsupported',
+    candidateFix: 'Use Copilot /models for local model listing; do not rely on upstream Anthropic /v1/models.',
+    candidateMapping: 'Anthropic GET /v1/models -> Copilot /v1/models',
+    rationale: 'The official Claude SDK exposes Models API, but Copilot upstream may not expose it on Anthropic paths.',
+    isUnsupported: details => details.status === 404 || buildUnsupportedMatcher(['models'])(details),
+    buildRequest: () => ({
+      method: 'GET',
+      path: '/v1/models',
+      expectedBody: 'list',
+      model: 'N/A',
+    }),
+  },
+  {
+    id: 'native-anthropic-batches-list-unsupported',
+    title: 'Anthropic Message Batches list is not exposed by Copilot',
+    tier: 'optional',
+    endpoint: 'anthropic-raw',
+    expectation: 'must_be_unsupported',
+    candidateFix: 'Do not claim asynchronous Anthropic batch processing unless Copilot exposes the endpoint or the proxy implements real batch semantics.',
+    candidateMapping: 'Anthropic GET /v1/messages/batches -> Copilot /v1/messages/batches',
+    rationale: 'Returning fake batch success would be misleading because clients expect asynchronous processing and retrievable results.',
+    isUnsupported: details => details.status === 404 || buildUnsupportedMatcher(['batches'])(details),
+    buildRequest: () => ({
+      method: 'GET',
+      path: '/v1/messages/batches?limit=1',
+      expectedBody: 'list',
+      model: 'N/A',
+    }),
+  },
+  {
+    id: 'native-anthropic-batches-create-unsupported',
+    title: 'Anthropic Message Batches create is not exposed by Copilot',
+    tier: 'optional',
+    endpoint: 'anthropic-raw',
+    expectation: 'must_be_unsupported',
+    candidateFix: 'Do not claim asynchronous Anthropic batch processing unless Copilot exposes the endpoint or the proxy implements real batch semantics.',
+    candidateMapping: 'Anthropic POST /v1/messages/batches -> Copilot /v1/messages/batches',
+    rationale: 'A fake 200 would not produce a real batch or usable result stream.',
+    isUnsupported: details => details.status === 404 || buildUnsupportedMatcher(['batches'])(details),
+    buildRequest: config => ({
+      method: 'POST',
+      path: '/v1/messages/batches',
+      body: {
+        requests: [{
+          custom_id: 'probe-1',
+          params: {
+            model: config.claudeModel,
+            max_tokens: 16,
+            messages: [{ role: 'user', content: 'Reply OK.' }],
+          },
+        }],
+      },
+      expectedBody: 'any',
+      model: 'N/A',
     }),
   },
   {

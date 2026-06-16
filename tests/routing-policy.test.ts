@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { assertResponsesPayloadTranslatable, resolveRoute } from '~/lib/routing-policy'
+import { assertMessagesPayloadTranslatable, assertResponsesPayloadTranslatable, resolveRoute } from '~/lib/routing-policy'
 
 function fail(message: string): never {
   throw new Error(message)
@@ -132,6 +132,32 @@ describe('assertResponsesPayloadTranslatable', () => {
             parameters: { type: 'object', properties: {}, additionalProperties: false },
           } as never,
         ],
+      },
+      (msg) => { throw new Error(msg) },
+    )).not.toThrow()
+  })
+})
+
+describe('assertMessagesPayloadTranslatable', () => {
+  test('rejects Anthropic server-side tools that cannot be translated to Responses', () => {
+    expect(() => assertMessagesPayloadTranslatable(
+      {
+        model: 'gpt-5.4',
+        max_tokens: 64,
+        messages: [{ role: 'user', content: 'Use code execution.' }],
+        tools: [{ type: 'code_execution_20260120', name: 'code_execution' }],
+      },
+      (msg) => { throw new Error(msg) },
+    )).toThrow(/server-side tools/)
+  })
+
+  test('passes custom tools that can be translated to Responses function tools', () => {
+    expect(() => assertMessagesPayloadTranslatable(
+      {
+        model: 'gpt-5.4',
+        max_tokens: 64,
+        messages: [{ role: 'user', content: 'Call noop.' }],
+        tools: [{ name: 'noop', input_schema: { type: 'object', properties: {} } }],
       },
       (msg) => { throw new Error(msg) },
     )).not.toThrow()

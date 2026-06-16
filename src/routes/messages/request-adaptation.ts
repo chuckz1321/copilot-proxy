@@ -107,16 +107,6 @@ export function sanitizeForCopilotBackend(payload: AnthropicMessagesPayload): vo
     consola.debug('Flattening legacy output_config.format.json_schema to output_config.format.schema')
     delete formatRecord.json_schema
   }
-
-  if ('name' in formatRecord) {
-    consola.debug('Stripping output_config.format.name (unsupported by Copilot /v1/messages backend)')
-    delete formatRecord.name
-  }
-
-  if ('strict' in formatRecord) {
-    consola.debug('Stripping output_config.format.strict (unsupported by Copilot /v1/messages backend)')
-    delete formatRecord.strict
-  }
 }
 
 function stripAdvisorToolsForCopilot(payload: AnthropicMessagesPayload): void {
