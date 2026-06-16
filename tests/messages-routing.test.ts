@@ -337,7 +337,7 @@ describe('messages route upstream adaptation', () => {
     expect(body.usage?.output_tokens).toBe(1)
   })
 
-  test('Claude non-streaming responses forward the effective model to upstream', async () => {
+  test('Claude non-streaming responses normalize dated model names without fast variant routing', async () => {
     const res = await server.request('/v1/messages', {
       method: 'POST',
       headers: {
@@ -359,13 +359,16 @@ describe('messages route upstream adaptation', () => {
     expect(url).toBe('https://api.githubcopilot.com/v1/messages')
 
     const forwardedPayload = JSON.parse(String(init?.body)) as { model?: string }
-    expect(forwardedPayload.model).toBe('claude-opus-4.6-fast')
+    expect(forwardedPayload.model).toBe('claude-opus-4.6')
+
+    const headers = init.headers as Record<string, string>
+    expect(headers['anthropic-beta']).toBe('fast-mode-2026-02-01')
 
     const body = await res.json() as { model?: string }
     expect(body.model).toBe('claude-opus-4-6-20250514')
   })
 
-  test('Claude Opus 4.7 1m beta keeps normalized native 1m upstream model', async () => {
+  test('Claude Opus 4.7 context beta keeps normalized base upstream model', async () => {
     const res = await server.request('/v1/messages', {
       method: 'POST',
       headers: {
@@ -392,7 +395,7 @@ describe('messages route upstream adaptation', () => {
     expect(body.model).toBe('claude-opus-4-7')
   })
 
-  test('Claude Opus 4.7 1m advisor beta is not forwarded upstream', async () => {
+  test('Claude Opus 4.7 strips advisor beta while forwarding context beta', async () => {
     const res = await server.request('/v1/messages', {
       method: 'POST',
       headers: {
@@ -436,10 +439,10 @@ describe('messages route upstream adaptation', () => {
     ])
 
     const headers = init.headers as Record<string, string>
-    expect(headers['anthropic-beta']).toBeUndefined()
+    expect(headers['anthropic-beta']).toBe('context-1m-2025-08-07')
   })
 
-  test('Claude Opus 4.7 1m beta forwards xhigh effort to native 1m upstream model', async () => {
+  test('Claude Opus 4.7 context beta forwards xhigh effort to native upstream model', async () => {
     const res = await server.request('/v1/messages', {
       method: 'POST',
       headers: {
@@ -1241,7 +1244,7 @@ describe('messages route upstream adaptation', () => {
     expect(body.input_tokens).toBe(26)
   })
 
-  test('count_tokens applies model variants and strips proxy-consumed beta features', async () => {
+  test('count_tokens normalizes model names and strips advisor beta feature', async () => {
     const res = await server.request('/v1/messages/count_tokens', {
       method: 'POST',
       headers: {
@@ -1266,10 +1269,10 @@ describe('messages route upstream adaptation', () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://api.githubcopilot.com/v1/messages/count_tokens')
     const forwardedPayload = JSON.parse(String(init.body)) as { model?: string, tools?: unknown }
-    expect(forwardedPayload.model).toBe('claude-opus-4.6-fast')
+    expect(forwardedPayload.model).toBe('claude-opus-4.6')
     expect(forwardedPayload.tools).toBeUndefined()
     const headers = init.headers as Record<string, string>
-    expect(headers['anthropic-beta']).toBe('claude-code-2025-01-01')
+    expect(headers['anthropic-beta']).toBe('claude-code-2025-01-01, fast-mode-2026-02-01')
   })
 })
 

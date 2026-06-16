@@ -10,7 +10,7 @@ import { forwardUpstreamHeaders } from '~/lib/upstream-headers'
 import { validateBody } from '~/lib/validate'
 import { createAnthropicCountTokens } from '~/services/copilot/create-anthropic-messages'
 
-import { applyModelVariant, sanitizeAnthropicBetaHeader } from './model-variants'
+import { normalizeAnthropicModelName, sanitizeAnthropicBetaHeader } from './model-normalization'
 import { sanitizeForCopilotBackend } from './request-adaptation'
 
 /**
@@ -24,7 +24,7 @@ export async function handleCountTokens(c: Context) {
 
     let anthropicPayload = await validateBody<AnthropicMessagesPayload>(c, AnthropicMessagesPayloadSchema)
 
-    const effectiveModel = applyModelVariant(anthropicPayload.model, anthropicPayload, anthropicBeta)
+    const effectiveModel = normalizeAnthropicModelName(anthropicPayload.model)
     if (effectiveModel !== anthropicPayload.model) {
       anthropicPayload = {
         ...anthropicPayload,

@@ -88,7 +88,7 @@ export function translateAnthropicRequestToResponses(
   if (payload.speed !== undefined) {
     logIgnoredAnthropicParameter(
       'speed',
-      'Anthropic speed is consumed by model variant routing when supported and otherwise has no Responses field.',
+      'Anthropic speed has no Responses equivalent, so translated requests omit it.',
     )
   }
 

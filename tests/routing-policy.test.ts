@@ -12,7 +12,7 @@ describe('resolveRoute — anthropic-messages client', () => {
     expect(route).toEqual({ backend: 'anthropic-messages', kind: 'direct' })
   })
 
-  test('Claude variant suffix (claude-opus-4.7) → native /v1/messages (direct)', () => {
+  test('Claude minor version (claude-opus-4.7) → native /v1/messages (direct)', () => {
     const route = resolveRoute('anthropic-messages', 'claude-opus-4.7', fail)
     expect(route).toEqual({ backend: 'anthropic-messages', kind: 'direct' })
   })

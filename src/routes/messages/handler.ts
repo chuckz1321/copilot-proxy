@@ -17,9 +17,9 @@ import { isNullish } from '~/lib/utils'
 import { validateBody } from '~/lib/validate'
 import { createResponses } from '~/services/copilot/create-responses'
 import {
-  applyModelVariant,
+  normalizeAnthropicModelName,
   sanitizeAnthropicBetaHeader,
-} from './model-variants'
+} from './model-normalization'
 import {
   createAnthropicMessagesWithThinkingSignatureRetry,
   normalizeAdaptiveThinkingForCopilot,
@@ -54,8 +54,9 @@ export async function handleCompletion(c: Context) {
   await enforceManualApproval(state)
 
   const requestedModel = anthropicPayload.model
-  // Determine the effective routed model, including Claude variant suffixes.
-  const effectiveModel = applyModelVariant(requestedModel, anthropicPayload, anthropicBeta)
+  // Normalize historical Anthropic model aliases while preserving the client's
+  // requested model name in responses.
+  const effectiveModel = normalizeAnthropicModelName(requestedModel)
   const selectedModel = findModelWithFallback(effectiveModel, state.models?.data)
   const modelMaxOutputTokens = selectedModel?.capabilities.limits.max_output_tokens
 
@@ -220,7 +221,8 @@ async function handleViaNativeAnthropic(
   effectiveModel: string,
   requestedModel: string,
 ) {
-  // Override model to effective (variant-resolved) model
+  // Forward the normalized upstream model while preserving the requested model
+  // name in client-visible responses.
   const payload: AnthropicMessagesPayload = {
     ...anthropicPayload,
     model: effectiveModel,

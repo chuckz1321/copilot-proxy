@@ -13,28 +13,6 @@ describe('getModelConfig', () => {
     expect(config.preferredApi).toBe('anthropic-messages')
   })
 
-  test('should let claude-opus-4.6-fast inherit the claude-opus-4.6 config', () => {
-    const config = getModelConfig('claude-opus-4.6-fast')
-    expect(config.enableCacheControl).toBe(true)
-    expect(config.defaultReasoningEffort).toBe('high')
-    expect(config.supportsToolChoice).toBe(true)
-    expect(config.supportsParallelToolCalls).toBe(true)
-    expect(config.supportedReasoningEfforts).toEqual(['low', 'medium', 'high', 'max'])
-    expect(config.supportedApis).toEqual(['anthropic-messages', 'chat-completions'])
-    expect(config.preferredApi).toBe('anthropic-messages')
-  })
-
-  test('should let claude-opus-4.6-1m inherit the claude-opus-4.6 config', () => {
-    const config = getModelConfig('claude-opus-4.6-1m')
-    expect(config.enableCacheControl).toBe(true)
-    expect(config.defaultReasoningEffort).toBe('high')
-    expect(config.supportsToolChoice).toBe(true)
-    expect(config.supportsParallelToolCalls).toBe(true)
-    expect(config.supportedReasoningEfforts).toEqual(['low', 'medium', 'high', 'max'])
-    expect(config.supportedApis).toEqual(['anthropic-messages', 'chat-completions'])
-    expect(config.preferredApi).toBe('anthropic-messages')
-  })
-
   test('should configure claude-opus-4.7 with native 1m full reasoning support', () => {
     const config = getModelConfig('claude-opus-4.7')
     expect(config.enableCacheControl).toBe(true)

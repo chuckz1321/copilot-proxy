@@ -1,8 +1,9 @@
 import type { Model, ModelsResponse } from '~/services/copilot/get-models'
 
 /**
- * Find a model by ID, with fallback suffix stripping for variant models.
- * e.g., "claude-opus-4.6-fast" → tries exact, then falls back to "claude-opus-4.6"
+ * Find a model by ID, with fallback suffix stripping for future model variants.
+ * e.g., "gpt-5.2-codex-experimental-latency" tries exact, then falls back to
+ * "gpt-5.2-codex" when that base model is present.
  */
 export function findModelWithFallback(modelId: string, models: Array<Model> | undefined): Model | undefined {
   if (!models)
