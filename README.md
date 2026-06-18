@@ -44,6 +44,7 @@ A reverse-engineered proxy for the GitHub Copilot API that exposes your Copilot 
 - **Codex Ready**: Works with OpenAI Codex CLI/SDK by pointing its base URL to this proxy.
 - **Model-Aware Routing and Translation**: Requests are routed directly when the requested client API is supported; otherwise only `/v1/messages` and `/responses` may translate to each other. The proxy does not translate to or from `/chat/completions`. Also applies Claude prompt caching (`copilot_cache_control`), preserves adaptive-thinking / `output_config.effort` compatibility, and normalizes provider-specific model IDs when Copilot expects a different upstream name.
 - **Claude Code Integration**: Easily configure and launch [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) to use Copilot as its backend with a simple command-line flag (`--claude-code`).
+- **Gateway Friendly**: Put [New API](https://github.com/QuantumNous/new-api) in front of this proxy to get one deployment that can serve many clients with New API-managed users, API keys, quotas, logs, rate limits, and billing.
 - **Usage Dashboard**: A web-based dashboard to monitor your Copilot API usage, view quotas, and see detailed statistics.
 - **Rate Limit Control**: Manage API usage with rate-limiting options (`--rate-limit`) and a waiting mechanism (`--wait`) to prevent errors from rapid requests.
 - **Upstream Resilience Controls**: Use built-in longer Copilot upstream timeouts, tune header/body/connect timeout overrides, and emit Anthropic SSE keepalive `ping` events while waiting for the first translated stream event.
@@ -170,6 +171,45 @@ The Docker image includes:
 - Non-root user for enhanced security
 - Health check for container monitoring
 - Pinned base image version for reproducible builds
+
+## Using with New API
+
+[New API](https://github.com/QuantumNous/new-api) is a self-hosted AI gateway and asset-management platform. It can sit in front of multiple upstream providers, expose OpenAI/Claude/Gemini-compatible entry points, and handle user-facing API keys, token quotas, model permissions, usage logs, rate limits, billing, and load-balancing from one console.
+
+This pairs well with copilot-proxy:
+
+- **copilot-proxy** stays as the private upstream bridge to GitHub Copilot. It owns GitHub login, Copilot token refresh, model routing, and OpenAI/Anthropic compatibility.
+- **New API** becomes the public or team-facing gateway. It owns user authentication, API keys, quotas, billing, audit logs, and client distribution.
+
+In this topology, deploy copilot-proxy on a private network and expose only New API to users:
+
+```text
+Clients / SDKs / Claude Code / Codex
+        |
+        | New API key, quota, logging, billing
+        v
+New API gateway
+        |
+        | Private upstream channel
+        v
+copilot-proxy
+        |
+        | GitHub Copilot authentication
+        v
+GitHub Copilot upstream
+```
+
+Recommended setup:
+
+1. Deploy and authenticate copilot-proxy first. Keep it reachable only from the New API host or container network, for example `http://copilot-proxy:4399`.
+2. Deploy New API following its own Docker/Compose guide.
+3. In New API, create an OpenAI-compatible or custom upstream channel that points to copilot-proxy's OpenAI-compatible base URL, for example `http://copilot-proxy:4399/v1`.
+4. Put any placeholder upstream key in New API if the channel form requires one. copilot-proxy authenticates to GitHub Copilot itself and does not need New API to forward a real upstream provider key.
+5. Give users New API API keys and the New API base URL. Clients should not need direct access to copilot-proxy, `/token`, or the persisted GitHub token.
+
+For Claude-compatible clients, use New API's Claude-compatible access layer if your deployment exposes it, or let New API convert/route to the OpenAI-compatible copilot-proxy channel according to your New API channel configuration. For Codex CLI, validate that your New API deployment forwards `/v1/models?client_version=...` query strings unchanged if you want Codex-compatible model catalog and context-window metadata; copilot-proxy supports that catalog path directly.
+
+This gives a practical "deploy once, access everywhere" layout: copilot-proxy concentrates the Copilot compatibility work in one place, while New API provides the shared access-control and API-key layer for all downstream clients.
 
 ## Using with npx (or pnpm/bunx)
 

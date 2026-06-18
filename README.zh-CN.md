@@ -44,6 +44,7 @@
 - **Codex 可用**：将 OpenAI Codex CLI/SDK 的 base URL 指向本代理即可使用。
 - **模型感知路由与翻译**：请求协议受模型支持时直通；否则仅 `/v1/messages` 与 `/responses` 之间可互译。代理不会与 `/chat/completions` 做互译。同时自动应用 Claude 提示缓存（`copilot_cache_control`），保留 `adaptive thinking` / `output_config.effort` 兼容，并在 Copilot 上游需要不同模型名时归一化 provider-specific 模型 ID。
 - **Claude Code 集成**：通过 `--claude-code` 一键生成配置命令，直接用 Copilot 作为 Claude Code 后端。
+- **适合接入网关**：可以把 [New API](https://github.com/QuantumNous/new-api) 放在本代理前面，实现一处部署、处处访问，由 New API 统一管理用户、API Key、额度、日志、限流与计费。
 - **用量面板**：Web 仪表盘查看 Copilot API 使用量与配额。
 - **速率限制**：通过 `--rate-limit` 与 `--wait` 控制请求节流，避免频繁请求报错。
 - **上游稳健性控制**：内置更长的 Copilot 上游 timeout，可按需覆盖 headers/body/connect timeout，并在等待首个 Anthropic 流事件时发送 SSE keepalive `ping`。
@@ -168,6 +169,45 @@ Docker 镜像包含：
 - 非 root 用户，安全性更好
 - 健康检查，便于容器监控
 - 固定基础镜像版本，保证可复现
+
+## 配合 New API 使用
+
+[New API](https://github.com/QuantumNous/new-api) 是一个自托管的 AI 网关和资产管理系统。它可以统一接入多个上游服务，对外提供 OpenAI / Claude / Gemini 兼容入口，并集中处理用户侧 API Key、Token 额度、模型权限、使用日志、限流、计费和负载均衡。
+
+它和 copilot-proxy 的职责可以清晰拆分：
+
+- **copilot-proxy** 作为私有上游，专注连接 GitHub Copilot，负责 GitHub 登录、Copilot token 刷新、模型路由以及 OpenAI / Anthropic 兼容。
+- **New API** 作为公开或团队内部入口，负责用户认证、API Key、额度、计费、审计日志和客户端分发。
+
+推荐拓扑是把 copilot-proxy 放在私有网络，只把 New API 暴露给用户：
+
+```text
+客户端 / SDK / Claude Code / Codex
+        |
+        | New API Key、额度、日志、计费
+        v
+New API 网关
+        |
+        | 私有上游渠道
+        v
+copilot-proxy
+        |
+        | GitHub Copilot 认证
+        v
+GitHub Copilot 上游
+```
+
+推荐配置步骤：
+
+1. 先部署并完成 copilot-proxy 认证。让它只对 New API 所在主机或容器网络可达，例如 `http://copilot-proxy:4399`。
+2. 按 New API 自身的 Docker / Compose 文档部署 New API。
+3. 在 New API 中创建 OpenAI 兼容或自定义上游渠道，指向 copilot-proxy 的 OpenAI 兼容 base URL，例如 `http://copilot-proxy:4399/v1`。
+4. 如果 New API 的渠道表单要求填写上游 Key，可以填占位值。copilot-proxy 自己负责登录 GitHub Copilot，不需要 New API 转发真实的上游 provider key。
+5. 对用户只分发 New API 的 API Key 和 New API 的 base URL。客户端不需要直接访问 copilot-proxy、`/token` 或持久化的 GitHub token。
+
+对于 Claude 兼容客户端，如果你的 New API 部署暴露了 Claude 兼容入口，可以直接使用该入口；也可以根据 New API 渠道配置，让 New API 转换或路由到 copilot-proxy 的 OpenAI 兼容渠道。对于 Codex CLI，如果希望保留 Codex 专用模型目录和上下文窗口信息，请确认你的 New API 部署会原样透传 `/v1/models?client_version=...` 这类 query string；copilot-proxy 已经直接支持这个目录路径。
+
+这样可以实现实际意义上的“一处部署，处处访问”：copilot-proxy 把 Copilot 兼容逻辑集中在一个私有上游，New API 负责所有下游客户端共享的访问控制和 API Key 层。
 
 ## 使用 npx（或 pnpm/bunx）
 
