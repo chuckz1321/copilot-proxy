@@ -201,6 +201,42 @@ test('/v1/responses streaming surfaces upstream stream errors as SSE error event
   expect(body).toContain('data: [DONE]')
 })
 
+test('/v1/responses returns non-stream JSON bodies instead of iterating error-shaped payloads', async () => {
+  fetchMock.mockImplementation(async (url: string) => {
+    if (!url.endsWith('/responses')) {
+      throw new Error(`Unexpected upstream URL: ${url}`)
+    }
+
+    return new Response(JSON.stringify({
+      error: {
+        message: 'upstream returned an error-shaped JSON body',
+        type: 'invalid_request_error',
+      },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  })
+
+  const response = await server.request('/v1/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-5.4',
+      input: 'Say hello.',
+    }),
+  })
+
+  expect(response.status).toBe(200)
+  expect(response.headers.get('content-type')).toContain('application/json')
+  expect(await response.json()).toEqual({
+    error: {
+      message: 'upstream returned an error-shaped JSON body',
+      type: 'invalid_request_error',
+    },
+  })
+})
+
 test('/v1/responses translated Anthropic streaming surfaces upstream stream errors as Responses SSE error events', async () => {
   fetchMock.mockImplementation(async (url: string) => {
     if (!url.endsWith('/v1/messages')) {

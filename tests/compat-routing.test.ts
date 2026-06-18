@@ -1,3 +1,5 @@
+import type { Model } from '~/services/copilot/get-models'
+
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
 
 import { state } from '../src/lib/state'
@@ -55,6 +57,7 @@ const fetchMock = mock(async (url: string) => {
 beforeEach(() => {
   fetchMock.mockClear()
   state.lastRequestTimestamp = undefined
+  state.models = undefined
 })
 
 describe('compat routing fallback', () => {
@@ -72,6 +75,28 @@ describe('compat routing fallback', () => {
     // translate Responses requests into a chat-completions backend.
     expect(response.status).toBe(400)
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test('/v1/responses routes future models from live supported_endpoints', async () => {
+    state.models = {
+      object: 'list',
+      data: [
+        makeModel('gpt-next', ['/responses']),
+      ],
+    }
+
+    const response = await server.request('/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-next',
+        input: 'hello',
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('https://api.githubcopilot.com/responses')
   })
 
   test('/v1/responses accepts typed input items when routing directly to responses', async () => {
@@ -322,3 +347,24 @@ describe('compat routing fallback', () => {
     ])
   })
 })
+
+function makeModel(id: string, supported_endpoints: string[]): Model {
+  return {
+    id,
+    supported_endpoints,
+    capabilities: {
+      family: 'test',
+      limits: {},
+      object: 'model_capabilities',
+      supports: {},
+      tokenizer: 'o200k_base',
+      type: 'chat',
+    },
+    model_picker_enabled: true,
+    name: id,
+    object: 'model',
+    preview: false,
+    vendor: 'test',
+    version: '1',
+  }
+}

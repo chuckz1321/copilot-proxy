@@ -216,3 +216,12 @@ export function isDaemonRunning(): { running: true, pid: number } | { running: f
 
   return { running: true, pid: info.pid }
 }
+
+export function isCurrentDaemonProcess(pid: number): boolean {
+  const info = readPid()
+  if (info === null || info.pid !== pid)
+    return false
+  if (!isProcessRunning(pid))
+    return false
+  return isOurDaemonProcess(pid, info.startTime)
+}

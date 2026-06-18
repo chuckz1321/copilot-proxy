@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import { afterEach, describe, expect, test } from 'bun:test'
 
-import { isProcessRunning, readPid, removePidFile, writePid } from '../src/daemon/pid'
+import { isCurrentDaemonProcess, isProcessRunning, readPid, removePidFile, writePid } from '../src/daemon/pid'
 import { PATHS } from '../src/lib/paths'
 
 afterEach(() => {
@@ -79,5 +79,13 @@ describe('isProcessRunning', () => {
 
   test('returns false for non-existent PID', () => {
     expect(isProcessRunning(999999)).toBe(false)
+  })
+})
+
+describe('isCurrentDaemonProcess', () => {
+  test('rejects a live PID that is not the daemon supervisor', () => {
+    writePid(process.pid)
+
+    expect(isCurrentDaemonProcess(process.pid)).toBe(false)
   })
 })

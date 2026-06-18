@@ -52,9 +52,22 @@ describe('Responses stream failure handling', () => {
 
     expect(events).toEqual([
       {
+        type: 'message_start',
+        message: {
+          id: 'resp_1',
+          type: 'message',
+          role: 'assistant',
+          content: [],
+          model: 'gpt-5.4',
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 3, output_tokens: 0 },
+        },
+      },
+      {
         type: 'message_delta',
         delta: { stop_reason: 'refusal', stop_sequence: null },
-        usage: { output_tokens: 1 },
+        usage: { input_tokens: 3, output_tokens: 1 },
       },
       {
         type: 'message_stop',
@@ -80,9 +93,22 @@ describe('Responses stream failure handling', () => {
 
     expect(events).toEqual([
       {
+        type: 'message_start',
+        message: {
+          id: 'resp_pause',
+          type: 'message',
+          role: 'assistant',
+          content: [],
+          model: 'gpt-5.4',
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 3, output_tokens: 0 },
+        },
+      },
+      {
         type: 'message_delta',
         delta: { stop_reason: 'pause_turn', stop_sequence: null },
-        usage: { output_tokens: 1 },
+        usage: { input_tokens: 3, output_tokens: 1 },
       },
       {
         type: 'message_stop',
@@ -117,5 +143,74 @@ describe('Responses stream failure handling', () => {
 
     expect(translateResponsesStreamEventToAnthropic(outputTextDoneEvent, anthropicState)).toEqual([])
     expect(translateResponsesStreamEventToAnthropic(functionCallDoneEvent, anthropicState)).toEqual([])
+  })
+
+  test('translateResponsesStreamEventToAnthropic lazily emits message_start before text deltas', () => {
+    const state = createAnthropicFromResponsesStreamState({ requestedModel: 'client-model' })
+
+    const events = translateResponsesStreamEventToAnthropic({
+      type: 'response.output_text.delta',
+      output_index: 0,
+      content_index: 0,
+      item_id: 'msg_1',
+      delta: 'hello',
+    }, state)
+
+    expect(events).toEqual([
+      {
+        type: 'message_start',
+        message: {
+          id: expect.stringMatching(/^msg_/),
+          type: 'message',
+          role: 'assistant',
+          content: [],
+          model: 'client-model',
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      },
+      {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'text', text: '' },
+      },
+      {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: 'hello' },
+      },
+    ])
+  })
+
+  test('translateResponsesStreamEventToAnthropic maps cached input tokens in streaming usage', () => {
+    const state = createAnthropicFromResponsesStreamState()
+
+    const events = translateResponsesStreamEventToAnthropic({
+      type: 'response.completed',
+      response: {
+        id: 'resp_usage',
+        object: 'response',
+        model: 'gpt-5.4',
+        output: [],
+        status: 'completed',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 7,
+          total_tokens: 107,
+          input_tokens_details: { cached_tokens: 80 },
+        },
+      },
+    }, state)
+
+    expect(events).toContainEqual({
+      type: 'message_delta',
+      delta: { stop_reason: 'end_turn', stop_sequence: null },
+      usage: {
+        input_tokens: 100,
+        output_tokens: 7,
+        cache_read_input_tokens: 80,
+      },
+    })
   })
 })

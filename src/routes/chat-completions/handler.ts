@@ -66,7 +66,9 @@ export async function handleCompletion(c: Context) {
     }
   }
 
-  const route = resolveRoute('chat-completions', payload.model, throwOpenAIInvalidRequestError)
+  const route = resolveRoute('chat-completions', payload.model, throwOpenAIInvalidRequestError, {
+    models: state.models?.data,
+  })
   // chat-completions clients only ever route to chat-completions backend.
   // resolveRoute() throws 4xx if the model does not list chat-completions in its supportedApis.
   if (route.backend !== 'chat-completions' || route.kind !== 'direct') {

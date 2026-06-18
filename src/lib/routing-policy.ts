@@ -2,9 +2,11 @@ import type { BackendApiType } from './model-config'
 
 import type { AnthropicMessagesPayload } from '~/lib/translation/types'
 import type { ResponsesPayload } from '~/services/copilot/create-responses'
+import type { Model } from '~/services/copilot/get-models'
 import { isAnthropicServerTool } from './anthropic-tools'
 import { formatBackendApi } from './backend-api'
 import { getModelConfig } from './model-config'
+import { findModelWithFallback } from './model-utils'
 
 /**
  * Where the request will actually go upstream and whether the proxy translates it.
@@ -53,8 +55,11 @@ export function resolveRoute(
   clientApi: ClientApi,
   model: string,
   onLocalError: (message: string) => never,
+  options?: {
+    models?: Array<Model>
+  },
 ): BackendRoute {
-  const supportedApis = new Set(getModelConfig(model).supportedApis)
+  const supportedApis = getSupportedApisForRouting(model, options?.models)
 
   if (supportedApis.has(clientApi)) {
     return { backend: clientApi, kind: 'direct' }
@@ -66,6 +71,37 @@ export function resolveRoute(
   }
 
   onLocalError(buildUnsupportedClientApiError(clientApi, model, supportedApis))
+}
+
+function getSupportedApisForRouting(
+  model: string,
+  models?: Array<Model>,
+): Set<BackendApiType> {
+  const liveModel = findModelWithFallback(model, models)
+  if (liveModel?.supported_endpoints?.length) {
+    return new Set(
+      liveModel.supported_endpoints
+        .map(endpointToBackendApi)
+        .filter((api): api is BackendApiType => api !== undefined),
+    )
+  }
+
+  return new Set(getModelConfig(model).supportedApis)
+}
+
+function endpointToBackendApi(endpoint: string): BackendApiType | undefined {
+  const normalized = endpoint.trim().toLowerCase().replace(/^wss?:/, '').replace(/^\/v1\//, '/').replace(/^v1\//, '').replace(/^\/+/, '')
+
+  switch (normalized) {
+    case 'chat/completions':
+      return 'chat-completions'
+    case 'responses':
+      return 'responses'
+    case 'messages':
+      return 'anthropic-messages'
+    default:
+      return undefined
+  }
 }
 
 /**

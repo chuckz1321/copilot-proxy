@@ -31,6 +31,7 @@ import type {
   ResponsesTool,
 } from '~/services/copilot/create-responses'
 
+import { randomUUID } from 'node:crypto'
 import { JSONResponseError } from '~/lib/error'
 import { isRecord } from '~/lib/type-guards'
 import { logLossyAnthropicCompatibility } from './anthropic-compat'
@@ -701,8 +702,11 @@ function throwUnsupportedInputItem(item: ResponsesInputItem): never {
 
 export function createAnthropicFromResponsesStreamState(options?: { requestedModel?: string }): AnthropicStreamState {
   return {
+    responseId: `msg_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
+    responseModel: options?.requestedModel ?? 'unknown',
     messageStartSent: false,
     messageStopSent: false,
+    upstreamTerminalEventSeen: false,
     contentBlockIndex: 0,
     contentBlockOpen: false,
     currentBlockType: null,
@@ -710,6 +714,8 @@ export function createAnthropicFromResponsesStreamState(options?: { requestedMod
     pendingLeadingText: '',
     hasThinkingContent: false,
     hasNonThinkingContent: false,
+    inputTokens: 0,
+    outputTokens: 0,
     toolCalls: {},
     requestedModel: options?.requestedModel,
   }
@@ -726,29 +732,13 @@ export function translateResponsesStreamEventToAnthropic(
 
   switch (event.type) {
     case 'response.created': {
-      if (!state.messageStartSent) {
-        events.push({
-          type: 'message_start',
-          message: {
-            id: event.response.id,
-            type: 'message',
-            role: 'assistant',
-            content: [],
-            model: state.requestedModel ?? event.response.model,
-            stop_reason: null,
-            stop_sequence: null,
-            usage: {
-              input_tokens: 0,
-              output_tokens: 0,
-            },
-          },
-        })
-        state.messageStartSent = true
-      }
+      rememberResponseEnvelope(state, event.response)
+      ensureMessageStarted(events, state)
       break
     }
 
     case 'response.output_text.delta': {
+      ensureMessageStarted(events, state)
       if (isToolBlockOpen(state)) {
         closeOpenAnthropicBlock(events, state)
       }
@@ -774,6 +764,7 @@ export function translateResponsesStreamEventToAnthropic(
 
     case 'response.output_item.added': {
       if (event.item.type === 'function_call' && event.item.call_id && event.item.name) {
+        ensureMessageStarted(events, state)
         if (state.contentBlockOpen) {
           closeOpenAnthropicBlock(events, state)
         }
@@ -823,6 +814,9 @@ export function translateResponsesStreamEventToAnthropic(
 
     case 'response.completed':
     case 'response.incomplete': {
+      state.upstreamTerminalEventSeen = true
+      rememberResponseEnvelope(state, event.response)
+      ensureMessageStarted(events, state)
       if (event.response.status === 'failed') {
         closeOpenAnthropicBlock(events, state)
         events.push({
@@ -846,9 +840,7 @@ export function translateResponsesStreamEventToAnthropic(
         {
           type: 'message_delta',
           delta: { stop_reason: stopReason, stop_sequence: null },
-          usage: {
-            output_tokens: event.response.usage?.output_tokens ?? 0,
-          },
+          usage: buildAnthropicStreamUsage(state),
         },
         { type: 'message_stop' },
       )
@@ -857,6 +849,8 @@ export function translateResponsesStreamEventToAnthropic(
     }
 
     case 'response.failed': {
+      state.upstreamTerminalEventSeen = true
+      rememberResponseEnvelope(state, event.response)
       closeOpenAnthropicBlock(events, state)
       events.push({
         type: 'error',
@@ -866,6 +860,7 @@ export function translateResponsesStreamEventToAnthropic(
     }
 
     case 'error': {
+      state.upstreamTerminalEventSeen = true
       closeOpenAnthropicBlock(events, state)
       events.push({
         type: 'error',
@@ -881,6 +876,64 @@ export function translateResponsesStreamEventToAnthropic(
   }
 
   return events
+}
+
+function ensureMessageStarted(
+  events: Array<AnthropicStreamEventData>,
+  state: AnthropicStreamState,
+): void {
+  if (state.messageStartSent) {
+    return
+  }
+
+  events.push({
+    type: 'message_start',
+    message: {
+      id: state.responseId,
+      type: 'message',
+      role: 'assistant',
+      content: [],
+      model: state.responseModel,
+      stop_reason: null,
+      stop_sequence: null,
+      usage: {
+        input_tokens: state.inputTokens,
+        output_tokens: 0,
+        ...(state.cacheReadInputTokens !== undefined && {
+          cache_read_input_tokens: state.cacheReadInputTokens,
+        }),
+      },
+    },
+  })
+  state.messageStartSent = true
+}
+
+function rememberResponseEnvelope(
+  state: AnthropicStreamState,
+  response: ResponsesResponse,
+): void {
+  state.responseId = response.id || state.responseId
+  state.responseModel = state.requestedModel ?? response.model ?? state.responseModel
+
+  if (response.usage) {
+    state.inputTokens = response.usage.input_tokens ?? state.inputTokens
+    state.outputTokens = response.usage.output_tokens ?? state.outputTokens
+    if (response.usage.input_tokens_details?.cached_tokens !== undefined) {
+      state.cacheReadInputTokens = response.usage.input_tokens_details.cached_tokens
+    }
+  }
+}
+
+function buildAnthropicStreamUsage(
+  state: AnthropicStreamState,
+): NonNullable<Extract<AnthropicStreamEventData, { type: 'message_delta' }>['usage']> {
+  return {
+    input_tokens: state.inputTokens,
+    output_tokens: state.outputTokens,
+    ...(state.cacheReadInputTokens !== undefined && {
+      cache_read_input_tokens: state.cacheReadInputTokens,
+    }),
+  }
 }
 
 function isToolBlockOpen(state: AnthropicStreamState): boolean {

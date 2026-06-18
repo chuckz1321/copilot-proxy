@@ -566,6 +566,45 @@ describe('messages route upstream adaptation', () => {
     expect(body).toContain('\"model\":\"claude-opus-4-6-20250514\"')
   })
 
+  test('Responses translated stream emits an error when upstream EOF arrives before terminal event', async () => {
+    fetchMock.mockImplementationOnce(async (url: string) => {
+      if (!url.endsWith('/responses')) {
+        throw new Error(`Unexpected upstream URL: ${url}`)
+      }
+
+      return new Response([
+        'event: response.created\n',
+        'data: {"type":"response.created","response":{"id":"resp_partial","object":"response","model":"gpt-5.4","output":[],"status":"in_progress","error":null}}\n\n',
+        'event: response.output_text.delta\n',
+        'data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"partial"}\n\n',
+      ].join(''), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    })
+
+    const res = await server.request('/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-5.4',
+        stream: true,
+        max_tokens: 64,
+        messages: [{ role: 'user', content: 'Say hello.' }],
+      }),
+    })
+
+    expect(res.status).toBe(200)
+
+    const body = await res.text()
+    expect(body).toContain('event: message_start')
+    expect(body).toContain('event: content_block_delta')
+    expect(body).toContain('event: error')
+    expect(body).toContain('Upstream Copilot connection terminated before the response completed.')
+    expect(body).not.toContain('event: message_stop')
+    expect(body).not.toContain('"stop_reason":"end_turn"')
+  })
+
   test('Claude non-streaming requests forward error responses from upstream', async () => {
     fetchMock.mockImplementationOnce(async (url: string) => {
       if (!url.endsWith('/v1/messages')) {

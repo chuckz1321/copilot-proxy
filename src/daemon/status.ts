@@ -12,12 +12,17 @@ export const status = defineCommand({
   },
   async run() {
     const nativeService = await loadInstalledNativeServiceCommands()
-    if (nativeService?.showAutoStartStatus())
-      return
+    if (nativeService) {
+      if (!nativeService.showAutoStartStatus())
+        consola.warn('Native service is installed, but its status command failed.')
+    }
+    else {
+      consola.info('Native service is not installed')
+    }
 
     const daemon = isDaemonRunning()
     if (!daemon.running) {
-      consola.info('Daemon is not running')
+      consola.info('App-managed daemon is not running')
       return
     }
 

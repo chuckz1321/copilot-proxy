@@ -1,3 +1,5 @@
+import type { Model } from '~/services/copilot/get-models'
+
 import { describe, expect, test } from 'bun:test'
 
 import { assertMessagesPayloadTranslatable, assertResponsesPayloadTranslatable, resolveRoute } from '~/lib/routing-policy'
@@ -27,6 +29,16 @@ describe('resolveRoute — anthropic-messages client', () => {
     expect(route).toEqual({ backend: 'responses', kind: 'translate' })
   })
 
+  test('live Anthropic endpoint support overrides static defaults for new models', () => {
+    const route = resolveRoute('anthropic-messages', 'future-claude', fail, {
+      models: [
+        makeModel('future-claude', ['/v1/messages']),
+      ],
+    })
+
+    expect(route).toEqual({ backend: 'anthropic-messages', kind: 'direct' })
+  })
+
   test('chat-completions-only model (gpt-4o) → 4xx (proxy refuses to translate to chat-completions)', () => {
     let captured: string | undefined
     expect(() => resolveRoute('anthropic-messages', 'gpt-4o', (msg) => {
@@ -51,6 +63,21 @@ describe('resolveRoute — responses client', () => {
 
   test('Dual-stack GPT-5.2 → /responses (direct, preferredApi)', () => {
     const route = resolveRoute('responses', 'gpt-5.2', fail)
+    expect(route).toEqual({ backend: 'responses', kind: 'direct' })
+  })
+
+  test('live Responses endpoint support lets future models route without static config', () => {
+    const route = resolveRoute('responses', 'gpt-6-preview', fail, {
+      models: [
+        makeModel('gpt-6-preview', ['/responses', 'ws:/responses']),
+      ],
+    })
+
+    expect(route).toEqual({ backend: 'responses', kind: 'direct' })
+  })
+
+  test('gpt-5-codex no longer inherits the dual chat-completions gpt-5 config', () => {
+    const route = resolveRoute('responses', 'gpt-5-codex', fail)
     expect(route).toEqual({ backend: 'responses', kind: 'direct' })
   })
 
@@ -86,6 +113,22 @@ describe('resolveRoute — chat-completions client', () => {
   test('Codex model → 4xx', () => {
     expect(() => resolveRoute('chat-completions', 'gpt-5.3-codex', (msg) => {
       throw new Error(msg)
+    })).toThrow(/cannot be reached via \/chat\/completions/)
+  })
+
+  test('gpt-5-codex → 4xx instead of inheriting gpt-5 chat support', () => {
+    expect(() => resolveRoute('chat-completions', 'gpt-5-codex', (msg) => {
+      throw new Error(msg)
+    })).toThrow(/cannot be reached via \/chat\/completions/)
+  })
+
+  test('live endpoints can remove stale static chat-completions support', () => {
+    expect(() => resolveRoute('chat-completions', 'gpt-5', (msg) => {
+      throw new Error(msg)
+    }, {
+      models: [
+        makeModel('gpt-5', ['/responses']),
+      ],
     })).toThrow(/cannot be reached via \/chat\/completions/)
   })
 })
@@ -137,6 +180,27 @@ describe('assertResponsesPayloadTranslatable', () => {
     )).not.toThrow()
   })
 })
+
+function makeModel(id: string, supported_endpoints: string[]): Model {
+  return {
+    id,
+    supported_endpoints,
+    capabilities: {
+      family: 'test',
+      limits: {},
+      object: 'model_capabilities',
+      supports: {},
+      tokenizer: 'o200k_base',
+      type: 'chat',
+    },
+    model_picker_enabled: true,
+    name: id,
+    object: 'model',
+    preview: false,
+    vendor: 'test',
+    version: '1',
+  }
+}
 
 describe('assertMessagesPayloadTranslatable', () => {
   test('rejects Anthropic server-side tools that cannot be translated to Responses', () => {

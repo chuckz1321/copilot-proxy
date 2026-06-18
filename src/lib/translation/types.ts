@@ -305,8 +305,11 @@ export type AnthropicStreamEventData
 
 // State for streaming translation
 export interface AnthropicStreamState {
+  responseId: string
+  responseModel: string
   messageStartSent: boolean
   messageStopSent: boolean
+  upstreamTerminalEventSeen: boolean
   contentBlockIndex: number
   contentBlockOpen: boolean
   currentBlockType: 'text' | 'thinking' | 'tool_use' | null
@@ -314,6 +317,9 @@ export interface AnthropicStreamState {
   pendingLeadingText: string
   hasThinkingContent: boolean
   hasNonThinkingContent: boolean
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens?: number
   toolCalls: {
     [openAIToolIndex: number]: {
       id: string

@@ -144,6 +144,26 @@ export function finalizeAnthropicStreamFromState(
   return events
 }
 
+export function finalizeTruncatedAnthropicStreamFromState(
+  state: AnthropicStreamState,
+): Array<AnthropicStreamEventData> {
+  const events: Array<AnthropicStreamEventData> = []
+
+  if (!state.messageStartSent || state.messageStopSent) {
+    return events
+  }
+
+  if (state.contentBlockOpen && !isTranslatedToolBlockOpen(state)) {
+    closeTranslatedAnthropicBlock(events, state)
+  }
+
+  events.push(translateErrorToAnthropicErrorEvent(
+    getUpstreamTerminationErrorMessage(state),
+  ))
+
+  return events
+}
+
 export function translateErrorToAnthropicErrorEvent(
   message?: string,
 ): AnthropicStreamEventData {

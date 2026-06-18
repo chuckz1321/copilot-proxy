@@ -30,10 +30,10 @@ import {
 } from './request-adaptation'
 import { createAnthropicSSEWriter } from './sse-writer'
 import {
-  canRecoverUpstreamTerminationAsMessage,
   createNativeAnthropicPassthroughState,
   finalizeAnthropicStreamFromState,
   finalizeNativeAnthropicPassthroughState,
+  finalizeTruncatedAnthropicStreamFromState,
   getUpstreamTerminationErrorMessage,
   handleAnthropicStreamFailure,
   shouldEmitNativeAnthropicTerminationError,
@@ -81,7 +81,9 @@ export async function handleCompletion(c: Context) {
 
   normalizeAdaptiveThinkingForCopilot(anthropicPayload)
 
-  const route = resolveRoute('anthropic-messages', effectiveModel, throwAnthropicInvalidRequestError)
+  const route = resolveRoute('anthropic-messages', effectiveModel, throwAnthropicInvalidRequestError, {
+    models: state.models?.data,
+  })
 
   try {
     switch (route.backend) {
@@ -126,7 +128,12 @@ async function handleViaResponses(
 
   const result = await createResponses(responsesPayload)
 
-  if (isResponsesNonStreaming(result.body)) {
+  if (!isResponsesStreamBody(result.body)) {
+    if (!isResponsesResponseBody(result.body)) {
+      throwAnthropicInvalidRequestError(
+        extractUnexpectedResponsesBodyMessage(result.body),
+      )
+    }
     if (consola.level >= 4) {
       consola.debug('Non-streaming responses (Anthropic path):', JSON.stringify(result.body))
     }
@@ -180,7 +187,9 @@ async function handleViaResponses(
       }
 
       if (!stream.aborted) {
-        const finalEvents = finalizeAnthropicStreamFromState(streamState)
+        const finalEvents = streamState.upstreamTerminalEventSeen
+          ? finalizeAnthropicStreamFromState(streamState)
+          : finalizeTruncatedAnthropicStreamFromState(streamState)
         await writeAnthropicEvents(anthropicWriter, finalEvents)
         completed = true
       }
@@ -194,8 +203,8 @@ async function handleViaResponses(
         state: streamState,
         unexpectedErrorMessage: 'An unexpected error occurred while translating the Copilot Responses stream.',
         writer: anthropicWriter,
-        finalizeRecoveredEvents: () => finalizeAnthropicStreamFromState(streamState),
-        canRecoverTermination: () => canRecoverUpstreamTerminationAsMessage(streamState),
+        finalizeRecoveredEvents: () => [],
+        canRecoverTermination: () => false,
       })
       return
     }
@@ -208,8 +217,32 @@ async function handleViaResponses(
   })
 }
 
-function isResponsesNonStreaming(body: Awaited<ReturnType<typeof createResponses>>['body']): body is import('~/services/copilot/create-responses').ResponsesResponse {
-  return Object.hasOwn(body, 'output')
+function isResponsesStreamBody(
+  body: Awaited<ReturnType<typeof createResponses>>['body'],
+): body is AsyncIterable<{ data?: string }> {
+  return typeof (body as { [Symbol.asyncIterator]?: unknown })?.[Symbol.asyncIterator] === 'function'
+}
+
+function isResponsesResponseBody(
+  body: Awaited<ReturnType<typeof createResponses>>['body'],
+): body is import('~/services/copilot/create-responses').ResponsesResponse {
+  return typeof body === 'object'
+    && body !== null
+    && Array.isArray((body as { output?: unknown }).output)
+    && typeof (body as { status?: unknown }).status === 'string'
+}
+
+function extractUnexpectedResponsesBodyMessage(
+  body: Awaited<ReturnType<typeof createResponses>>['body'],
+): string {
+  if (typeof body === 'object' && body !== null) {
+    const error = (body as { error?: unknown }).error
+    if (typeof error === 'object' && error !== null && typeof (error as { message?: unknown }).message === 'string') {
+      return (error as { message: string }).message
+    }
+  }
+
+  return 'Copilot Responses upstream returned a non-stream JSON payload that is not a Responses response.'
 }
 
 /**

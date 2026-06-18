@@ -13,14 +13,18 @@ import {
   createNativeAnthropicPassthroughState,
   finalizeAnthropicStreamFromState,
   finalizeNativeAnthropicPassthroughState,
+  finalizeTruncatedAnthropicStreamFromState,
   shouldEmitNativeAnthropicTerminationError,
   updateNativeAnthropicPassthroughState,
 } from '~/routes/messages/stream-finalizer'
 
 function makeState(overrides: Partial<AnthropicStreamState> = {}): AnthropicStreamState {
   return {
+    responseId: 'resp_partial',
+    responseModel: 'gpt-5.4',
     messageStartSent: true,
     messageStopSent: false,
+    upstreamTerminalEventSeen: false,
     contentBlockIndex: 0,
     contentBlockOpen: false,
     currentBlockType: null,
@@ -28,6 +32,8 @@ function makeState(overrides: Partial<AnthropicStreamState> = {}): AnthropicStre
     pendingLeadingText: '',
     hasThinkingContent: false,
     hasNonThinkingContent: false,
+    inputTokens: 0,
+    outputTokens: 0,
     toolCalls: {},
     ...overrides,
   }
@@ -238,6 +244,28 @@ describe('finalizeAnthropicStreamFromState', () => {
 
     const alreadyStopped = makeState({ messageStopSent: true, hasNonThinkingContent: true })
     expect(finalizeAnthropicStreamFromState(alreadyStopped)).toEqual([])
+  })
+
+  test('truncated streams emit an error instead of synthetic end_turn', () => {
+    const state = makeState({
+      contentBlockIndex: 0,
+      contentBlockOpen: true,
+      currentBlockType: 'text',
+      hasNonThinkingContent: true,
+    })
+
+    const events = finalizeTruncatedAnthropicStreamFromState(state)
+
+    expect(events).toEqual([
+      { type: 'content_block_stop', index: 0 },
+      {
+        type: 'error',
+        error: {
+          type: 'api_error',
+          message: 'Upstream Copilot connection terminated before the response completed.',
+        },
+      },
+    ])
   })
 })
 

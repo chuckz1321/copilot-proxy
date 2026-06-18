@@ -3,7 +3,7 @@ import type { Context } from 'hono'
 import type { SSEMessage } from 'hono/streaming'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { AnthropicStreamEventData } from '~/lib/translation/types'
-import type { ResponsesPayload, ResponsesResponse } from '~/services/copilot/create-responses'
+import type { ResponsesPayload } from '~/services/copilot/create-responses'
 import consola from 'consola'
 
 import { streamSSE } from 'hono/streaming'
@@ -32,6 +32,11 @@ import { createAnthropicMessages } from '~/services/copilot/create-anthropic-mes
 import { createResponses, forwardResponsesEndpoint, summarizeResponsesPayload } from '~/services/copilot/create-responses'
 import { normalizeAnthropicModelName } from '../messages/model-normalization'
 
+type ResponsesStreamBody = Extract<
+  Awaited<ReturnType<typeof createResponses>>['body'],
+  AsyncIterable<unknown>
+>
+
 export async function handleResponses(c: Context) {
   await enforceRateLimit(state)
 
@@ -49,7 +54,9 @@ export async function handleResponses(c: Context) {
 
   const requestedModel = payload.model
   const effectiveModel = normalizeAnthropicModelName(requestedModel)
-  const route = resolveRoute('responses', effectiveModel, throwInvalidResponsesRequest)
+  const route = resolveRoute('responses', effectiveModel, throwInvalidResponsesRequest, {
+    models: state.models?.data,
+  })
 
   try {
     switch (route.backend) {
@@ -120,12 +127,12 @@ export async function handleResponsesPassthrough(
 async function handleViaResponses(c: Context, payload: ResponsesPayload) {
   const result = await createResponses(payload)
 
-  if (isResponsesNonStreaming(result.body)) {
+  if (!isResponsesStreamBody(result.body)) {
     if (consola.level >= 4) {
       consola.debug('Non-streaming responses:', JSON.stringify(result.body))
     }
     forwardUpstreamHeaders(c, result.headers)
-    return c.json(result.body)
+    return c.json(result.body as never)
   }
 
   consola.debug('Streaming responses')
@@ -168,8 +175,10 @@ function throwInvalidResponsesRequest(message: string): never {
   })
 }
 
-function isResponsesNonStreaming(body: Awaited<ReturnType<typeof createResponses>>['body']): body is ResponsesResponse {
-  return Object.hasOwn(body, 'output')
+function isResponsesStreamBody(
+  body: Awaited<ReturnType<typeof createResponses>>['body'],
+): body is ResponsesStreamBody {
+  return typeof (body as { [Symbol.asyncIterator]?: unknown })?.[Symbol.asyncIterator] === 'function'
 }
 
 /** Translation path: model supports Anthropic Messages API, translate Responses ↔ Anthropic */

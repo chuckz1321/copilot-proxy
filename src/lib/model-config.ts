@@ -134,6 +134,14 @@ const MODEL_CONFIGS: Record<string, ModelConfig> = {
     supportsToolChoice: true,
     supportsParallelToolCalls: true,
   },
+  'gpt-5-codex': {
+    supportedApis: ['responses'],
+    reasoningMode: 'thinking',
+    defaultReasoningEffort: 'high',
+    supportedReasoningEfforts: ['low', 'medium', 'high'],
+    supportsToolChoice: true,
+    supportsParallelToolCalls: true,
+  },
 
   // GPT-5.4 — responses only
   'gpt-5.4': {

@@ -135,6 +135,13 @@ describe('getModelConfig', () => {
     expect(config.reasoningMode).toBe('thinking')
   })
 
+  test('should configure gpt-5-codex as responses-only', () => {
+    const config = getModelConfig('gpt-5-codex')
+    expect(config.supportedApis).toEqual(['responses'])
+    expect(config.reasoningMode).toBe('thinking')
+    expect(config.defaultReasoningEffort).toBe('high')
+  })
+
   test('should match gemini models via prefix', () => {
     const config = getModelConfig('gemini-3.1-pro-preview')
     expect(config.supportedApis).toEqual(['chat-completions'])
